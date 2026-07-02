@@ -1,0 +1,279 @@
+---
+name: headless-relay
+description: Headless handoff guide for running other AI models from inside an agent session (Claude Code, Codex CLI, OpenClaw, Hermes). Covers GPT (codex exec), GLM (opencode run or zcode --prompt), Grok (grok -p), and Claude (claude -p or a subagent) - inline vs file prompts, parallel multi-model consensus, JSON output, session resume, provider-terms compliance. Use for "ask codex", "ask GLM", "ask grok", "second opinion", "cross-model review", "run headless", "ask another model".
+license: MIT. Complete terms in LICENSE.txt
+metadata: {"version": "1.0.0"}
+---
+
+# headless-relay
+
+This skill provides instructions for delegating a task to another AI model without leaving the
+current agent session. The user says "ask Codex", "get GLM's opinion", "run this by Grok"; the
+orchestrating agent (Claude Code, Codex CLI, or another harness) writes the prompt, runs the
+target model's headless CLI through its shell tool, reads the model's stdout, and summarizes
+the answer back. Follow these patterns exactly.
+
+## The four targets
+
+| Target | CLI | Headless entry point | Auth / plan |
+|--------|-----|----------------------|-------------|
+| GPT | `codex` (OpenAI Codex CLI) | `codex exec` | ChatGPT plan or OpenAI API key (`codex login`) |
+| GLM | `opencode`, or `zcode` (ships inside the ZCode desktop app) | `opencode run` / `zcode --prompt` | Z.ai Coding Plan (API key or ZCode app login) |
+| Grok | `grok` (xAI Grok Build) | `grok -p` / `--single` | SuperGrok (`grok login`) |
+| Claude | `claude` (Claude Code) | `claude -p`, or the harness's native subagent | Anthropic auth of the current session |
+
+## Preflight: is the model available?
+
+Before attempting a model, confirm its CLI is installed AND authenticated. Skip any model that
+fails the check — never brute-force a missing binary, retry with different flags, or silently
+substitute a different model to fill the gap.
+
+| Model | Binary check | Auth / plan check |
+|-------|--------------|-------------------|
+| GPT (Codex) | `command -v codex` | fails fast with an auth error when logged out (`codex login`) |
+| GLM via OpenCode | `command -v opencode` | `opencode auth list` shows a Z.AI credential |
+| GLM via ZCode | `command -v zcode` (add a PATH wrapper if only the app is installed) | `~/.zcode/cli/config.json` exists or `ZCODE_API_KEY` is set. `zcode login` is currently broken — see [references/cli-reference.md](references/cli-reference.md) |
+| Grok | `command -v grok` | `grok models` prints "You are not authenticated." when logged out. A logged-in state can still hit a fatal auth-refresh hang — see Troubleshooting |
+| Claude | in-session already (native subagent); `command -v claude` only for headless | current session auth |
+
+Rules:
+- Missing binary or failed auth means that model is unavailable. Report it plainly ("Grok CLI not
+  installed / not logged in — skipping") and continue with the models that ARE available.
+- If the user asked for ONLY an unavailable model, stop and ask how to proceed (install it, or
+  use an available one). Do not quietly answer with a different model.
+- No subscription / plan makes the run error quickly — surface that error, do not keep retrying.
+- GLM has two first-class setups — use whichever the user already has: OpenCode (standalone
+  terminal agent) or the ZCode desktop app's bundled `zcode` command. `zcode` ships INSIDE the
+  app; there is no separately installable ZCode CLI, and the npm packages named `zcode` /
+  `zcode-cli` are unrelated third-party stubs — never install them.
+
+## Compliance gate: check the orchestrator and the target
+
+This skill is portable — it may run inside Claude Code, Codex CLI, or an OpenClaw / Nous
+Research (Hermes) agent whose main model is anything. Before any handoff, two independent checks.
+
+### Check 1 — do not hand off to the model you already are
+
+Reaching a *different* provider's model is what needs a headless CLI. Reaching the SAME provider
+(for fresh context or to delegate a subtask) should use the orchestrator's native subagent:
+cheaper, no subprocess, and it stays inside the harness's own session accounting.
+
+| Orchestrator | Same-provider model | Other-provider model |
+|--------------|---------------------|----------------------|
+| Claude Code | Agent tool subagent (`fable`/`opus`/`sonnet`) | headless CLI |
+| Codex CLI | Codex native subagents (`[agents]` config; ask "spawn one agent per…") | headless CLI |
+| OpenClaw / Hermes / other | the harness's own subagent / task mechanism | headless CLI |
+
+So a Codex-driven session that wants GPT should spawn a Codex subagent, not nest `codex exec`.
+It reaches Claude/GLM/Grok only through a headless CLI — subject to Check 2.
+
+### Check 2 — the target model's provider terms bind you
+
+Reaching another provider's model is governed by THAT provider's terms, and being a non-native
+harness (Codex, OpenClaw, Hermes) is exactly the trigger.
+
+| Target | Constraints from a non-native harness |
+|--------|----------------------------------------|
+| Claude | Anthropic blocks subscription routing through third-party harnesses (April 2026) — use a metered Anthropic API key, never a Pro/Max session. Commercial Terms D.4 bars competing-model development. Fable 5 detects frontier-LLM-dev tasks and hands them to Opus 4.8 (disclosed June 2026; originally silent, now a visible fallback). Detail: [references/anthropic-terms.md](references/anthropic-terms.md) |
+| GPT (Codex) | ChatGPT-plan OAuth from third-party harnesses is officially permitted (May 2026, OpenClaw explicitly endorsed). Plan credentials reach OpenAI models only. Using Output to develop competing models is banned (ToU, Jan 2026). |
+| Grok | xAI Acceptable Use Policy + Enterprise ToS prohibit using the Service or Output to develop competing models, and ban scraping, reselling, or distilling Output. |
+| GLM | Coding Plan is limited to officially supported tools — Claude Code, OpenCode, OpenClaw, and Hermes Agent are all on the current list. Open-weight (MIT), no sharp competing-model clause, but quota / fair-use enforcement is aggressive. |
+
+Two rules hold regardless of orchestrator. First, check the target provider's stance on
+subscription auth from non-native harnesses: Anthropic blocks it (metered API key only), OpenAI
+explicitly permits it, Z.ai ties the plan to its supported-tools list. Second, never use any
+model to build or train a competing model or to reverse-engineer a harness. A Nous Research /
+Hermes agent working on Hermes models is therefore barred from the Claude AND Grok branches for
+that work; GLM (open-weight, and Hermes Agent is officially supported) is the most permissive
+target.
+
+## Copy-paste baseline commands
+
+These are the minimal read-only forms — the model reasons over the prompt text you give it,
+without touching the repo or the network. Safest default for a "second opinion" on pasted code.
+
+```bash
+# GPT (Codex) — default sandbox is read-only, no network
+codex exec "your question here"
+
+# GLM via OpenCode
+echo "your question here" | opencode run -m "zai-coding-plan/glm-5.2" --variant max
+
+# GLM via the ZCode app's bundled CLI (one-time setup: references/cli-reference.md)
+zcode --prompt "your question here"
+
+# Grok — 2>/dev/null strips harmless MCP/auth startup noise on stderr
+grok -p "your question here" -m grok-build --disable-web-search 2>/dev/null
+
+# Claude (headless subprocess)
+claude -p "your question here" --model fable
+```
+
+## How to pass the prompt (three forms)
+
+| Prompt shape | Form | Example |
+|--------------|------|---------|
+| Short, one line, no special chars | Inline argument or `echo … \|` | `codex exec "is this regex safe?"` |
+| Long, multi-line, or contains backticks / `$` / quotes / a diff | File + stdin | write `/tmp/handoff.md`, then `< /tmp/handoff.md` |
+| Programmatic content blocks | JSON flag | `grok --prompt-json '…'` |
+
+**Why a file for anything non-trivial:** passing a long prompt inside `"…"` lets the shell
+interpret backticks (`` ` ``) as command substitution, `$` as variables, and newlines/quotes
+break the quoting. Writing the prompt to a file and feeding it on stdin passes the bytes
+verbatim. This is the same reason `gh … --body-file` beats `--body "…"`.
+
+`stdin` = a command's standard input stream. Two equivalent ways to fill it:
+- `< /tmp/handoff.md` — redirect the file's contents into the command's stdin.
+- `cat /tmp/handoff.md | cmd` — `cat` prints the file, the pipe `|` feeds it to `cmd`'s stdin.
+
+Per-CLI stdin behavior:
+
+```bash
+# Codex: reads stdin when no prompt arg is given (or when the arg is "-")
+codex exec < /tmp/handoff.md
+
+# OpenCode: no stdin-redirect; pipe it
+cat /tmp/handoff.md | opencode run -m "zai-coding-plan/glm-5.2" --variant max
+
+# ZCode: no stdin mode — substitute the file into the arg (a quoted "$()" passes the
+# bytes verbatim; the file's backticks/$ are NOT re-interpreted by the shell)
+zcode --prompt "$(cat /tmp/handoff.md)"
+
+# Grok: takes a file flag directly (not stdin)
+grok --prompt-file /tmp/handoff.md -m grok-build --disable-web-search 2>/dev/null
+
+# Claude: command-substitute the file into the prompt arg
+claude -p "$(cat /tmp/handoff.md)" --model fable
+```
+
+## Scenarios
+
+### Scenario A — quick one-off question to one model
+Use the inline baseline command above. No file, no network. Read the stdout, summarize.
+
+### Scenario B — long prompt (a diff, a file, a spec)
+1. Write the full context to `/tmp/handoff.md` (question at the top, then the code/diff).
+2. Feed it via the per-CLI stdin form above.
+3. Summarize the model's answer; quote its concrete file:line claims verbatim.
+
+### Scenario C — parallel multi-model second opinion / consensus
+Run 2+ models on the SAME prompt file at once (independent shell calls in one message so they
+run concurrently), then compare where they agree and diverge.
+
+```bash
+codex exec < /tmp/handoff.md > /tmp/ans-gpt.md 2>/dev/null &
+cat /tmp/handoff.md | opencode run -m "zai-coding-plan/glm-5.2" --variant max > /tmp/ans-glm.md 2>/dev/null &
+grok --prompt-file /tmp/handoff.md -m grok-build --disable-web-search > /tmp/ans-grok.md 2>/dev/null &
+wait
+```
+
+On a machine with ZCode instead of OpenCode, swap the GLM lane:
+`zcode --prompt "$(cat /tmp/handoff.md)" > /tmp/ans-glm.md 2>/dev/null &`
+
+Then read the answer files and present a merged view: shared findings first, then each model's
+unique points, then contradictions to resolve. A finding cited with a specific file:line by one
+model beats a vague agreement from the others — verify before dismissing it as an outlier.
+
+### Scenario D — the model must read the repo or run git/gh
+Only Codex needs special handling: its default sandbox blocks file writes AND the network.
+Sandbox and network are independent axes — enable both explicitly:
+
+```bash
+codex exec --sandbox workspace-write \
+  -c 'sandbox_workspace_write.network_access=true' \
+  "review the uncommitted changes and flag correctness bugs"
+```
+
+`codex exec` is non-interactive and never prompts for approval. Do NOT pass
+`--ask-for-approval` — exec rejects it with `unexpected argument` (that flag belongs to
+interactive `codex`). `--full-auto` still parses as a hidden deprecated alias but still blocks
+the network — avoid it. OpenCode and Grok already run agentic with repo access in their default
+run mode; scope Grok down with `--disable-web-search` when you want diff-deterministic output.
+
+### Scenario E — structured JSON output for scripting
+
+| CLI | Flag | Extract the answer |
+|-----|------|--------------------|
+| Codex | `--json` (JSONL events) or `-o out.txt` (last message to file) | parse JSONL, or read `out.txt` |
+| OpenCode | `--format json` | `jq` over the raw event JSON |
+| ZCode | `--json` | `jq -r '.response'`; session id = `.sessionId`, token usage under `.usage` |
+| Grok | `--output-format json` | `jq -r '.text // .result'` |
+| Claude | `--output-format json` | `jq -r '.result'`; session id = `.session_id`, cost = `.total_cost_usd` |
+
+```bash
+result=$(claude -p "summarize the repo" --model fable --output-format json)
+echo "$result" | jq -r '.result'
+```
+
+### Scenario F — multi-turn / resume a session
+Every CLI is stateless per headless call unless you thread the session id (run from the same
+directory).
+
+```bash
+sid=$(claude -p "start a review" --model fable --output-format json | jq -r '.session_id')
+claude -p "now check the error paths" --resume "$sid"
+```
+
+`codex exec resume --last`, `opencode run -c` (continue) or `-s <id>`, `grok -r [id]` /
+`grok -c`, `zcode --resume sess_<id>` / `zcode -c` are the equivalents. See
+[references/cli-reference.md](references/cli-reference.md).
+
+### Scenario G — built-in code review of the current repo
+Codex and Grok ship review affordances that beat a hand-written prompt for repo diffs:
+
+```bash
+codex exec review --uncommitted          # reviews staged + unstaged + untracked
+grok --check -p "review the diff" -m grok-build --disable-web-search 2>/dev/null
+```
+
+## Claude target: subprocess vs in-session subagent
+
+First clear the compliance gate above — both methods below are off-limits when a non-Anthropic
+harness is the orchestrator. Two ways to hand off to Claude, and they are NOT interchangeable:
+
+| Method | When to use |
+|--------|-------------|
+| Native subagent (e.g. Agent tool, `model: "fable"`) | Default. In-session, no subprocess, result returns straight to the orchestrator. Cheapest. |
+| `claude -p … --model fable` | When Claude must run truly parallel alongside the codex/opencode/grok subprocesses in one shell burst, or you need a clean JSON transcript with its own session id. |
+
+An orchestrator's native subagents spawn its OWN provider's models only — they cannot reach
+another provider. That is why cross-provider targets ALWAYS require a headless shell call,
+while a same-provider second opinion should stay in-session as a subagent.
+
+## Orchestration rules
+
+1. The orchestrating agent does the work. The user only says "ask X" — the orchestrator
+   prepares the prompt, picks inline vs file, runs the shell command(s), and reports the result.
+2. Default to the read-only baseline. Escalate to `workspace-write` + network (Codex) only when
+   the model genuinely must touch the repo — never silently.
+3. For multi-model runs, launch all commands in one message so they run concurrently, then
+   `wait`.
+4. Never paste secrets into a prompt file or command. Reference config by name only.
+5. Report faithfully: if a model errored or timed out, say so with its stderr — do not fabricate
+   an answer.
+
+## Reference files
+
+| File | Contents |
+|------|----------|
+| [references/cli-reference.md](references/cli-reference.md) | Full per-CLI flag tables, model ids, ZCode setup recipes, output-format shapes, session resume, sandbox/network detail, troubleshooting |
+| [references/anthropic-terms.md](references/anthropic-terms.md) | Compliance detail: Anthropic subscription-routing block, Commercial Terms D.4, Fable 5 safeguards, enforcement history, plus the OpenAI / xAI / Z.ai provider-terms matrix, with citations |
+
+## Troubleshooting (core)
+
+| Symptom | Fix |
+|---------|-----|
+| Codex: `unexpected argument '--ask-for-approval'` | `codex exec` never prompts; drop the flag (Scenario D) |
+| Codex: "network access restricted" / `gh` fails | Add `--sandbox workspace-write -c 'sandbox_workspace_write.network_access=true'` (Scenario D) |
+| Prompt with backticks / `$` mangled or runs as a command | Use the file + stdin form, not inline `"…"` |
+| Grok stderr shows `AuthorizationRequired` / `Skipping MCP tool` but stdout arrives | Cosmetic startup noise — pipe `2>/dev/null` |
+| Grok `-p` prints nothing for 2+ minutes (stderr may show `worker quit with fatal: Transport channel closed, when Auth(AuthorizationRequired)`, or nothing at all) | The run hangs instead of exiting. Kill it; if the fatal auth line is present run `grok login` and retry once; if it hangs again the relay/service side is down — skip Grok and report it. Always wrap unattended grok calls in a timeout |
+| Grok cites unrelated tweets / web pages | Missing `--disable-web-search` |
+| zcode: `Model config is missing. Create ~/.zcode/cli/config.json …` | One-time setup — follow the ZCode recipes in [references/cli-reference.md](references/cli-reference.md) |
+| `zcode login`: `OAuth response is not valid JSON` | Known open bug — skip login entirely; use the config-file or env-var recipe instead |
+| OpenCode `-f` file attach errors | Pipe via stdin instead (`cat file \| opencode run …`) |
+| GLM cites a CI/workflow/env change not in the diff | Known GLM infra-hallucination — verify against the actual file before acting |
+| A CLI is missing or unauthenticated | Report it and skip that model; do not substitute another silently |
+| A non-Anthropic harness (OpenClaw / Hermes) triggered this skill | Skip the Claude/`claude -p` branch entirely; use Codex / GLM / Grok. See the compliance gate and [references/anthropic-terms.md](references/anthropic-terms.md) |
+
+See [references/cli-reference.md](references/cli-reference.md) for the full table.
