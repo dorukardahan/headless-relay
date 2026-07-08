@@ -58,5 +58,6 @@ a two-check gate (orchestrator identity, target-provider terms) and a citations 
 ## License
 
 MIT — see `LICENSE.txt`. Command behavior was live-verified 2026-07-02 against codex-cli
-0.142.5, opencode 1.14.31, grok 0.2.22, claude 2.1.198, and ZCode 3.2.2 (CLI 0.15.0); CLIs
-drift fast, so re-verify flags when something errors.
+0.142.5, opencode 1.14.31, claude 2.1.198, and ZCode 3.2.2 (CLI 0.15.0); the Grok lane was
+re-verified 2026-07-08 on grok 0.2.91 with grok-4.5. CLIs drift fast, so re-verify flags when
+something errors.

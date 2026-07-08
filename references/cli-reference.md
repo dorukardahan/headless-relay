@@ -1,9 +1,9 @@
 # CLI reference — headless flags per model
 
 Full per-CLI detail for `headless-relay`. Flags verified 2026-07-02 against installed
-binaries: codex-cli 0.142.5, opencode 1.14.31, grok 0.2.22, claude (Claude Code) 2.1.198,
-zcode CLI 0.15.0 (ZCode desktop app 3.2.2). Flags drift — re-check `--help` when a command
-errors with `unexpected argument`.
+binaries: codex-cli 0.142.5, opencode 1.14.31, claude (Claude Code) 2.1.198, zcode CLI 0.15.0
+(ZCode desktop app 3.2.2); Grok section re-verified 2026-07-08 on grok 0.2.91 (grok-4.5
+launch). Flags drift — re-check `--help` when a command errors with `unexpected argument`.
 
 ## Contents
 - [GPT — codex exec](#gpt--codex-exec)
@@ -202,19 +202,23 @@ UNVERIFIED; only the paid-plan `builtin:zai` / `builtin:zai-coding-plan` bridge 
 
 ## Grok — grok headless
 
-Headless via `-p`. Always pass `-m grok-build` explicitly (the 512K-context, 16-agent Heavy
-model): the CLI's default model may be a lighter one (`grok models` showed
-`grok-composer-2.5-fast` as default on 0.2.22).
+Headless via `-p`. Use `-m grok-4.5` — xAI's coding/agents frontier model (launched
+2026-07-08, trained with Cursor; 500K context; reasoning-effort supported, default `high`).
+It is the CLI default on 0.2.91, but pass `-m` explicitly anyway: defaults drift, and the
+alternative `grok-composer-2.5-fast` (Cursor's fast coding model) is a lighter tier. The
+former `grok-build` model id was RETIRED from the CLI at the 4.5 launch and now fails with
+`unknown model id`; the separate `grok-build-0.1` survives only on the metered Code API, not
+as a CLI model.
 
 | Flag | Meaning |
 |------|---------|
 | `-p, --single <PROMPT>` | Single-turn prompt to stdout, then exit. |
 | `--prompt-file <PATH>` | Single-turn prompt from a file. |
 | `--prompt-json <JSON>` | Prompt as JSON content blocks. |
-| `-m, --model <MODEL>` | Model id, e.g. `grok-build`. |
+| `-m, --model <MODEL>` | Model id, e.g. `grok-4.5`. |
 | `--output-format <FMT>` | `plain` (default), `json`, `streaming-json`. |
 | `--disable-web-search` | Disable web search + fetch. Mandatory for diff-deterministic review. |
-| `--effort <LEVEL>` | `low\|medium\|high\|xhigh\|max`. `--reasoning-effort` also exists. `grok-build` bakes reasoning into Heavy mode and may ignore it; harmless to omit. |
+| `--effort <LEVEL>` | `low\|medium\|high\|xhigh\|max`. `--reasoning-effort` also exists. grok-4.5 supports reasoning effort (model default `high`; `--effort high` live-verified). |
 | `--best-of-n <N>` | Run the task N ways in parallel, pick the best (headless only). |
 | `--check` | Append a self-verification loop to the prompt (headless only). |
 | `-r, --resume [id]` / `-c, --continue` | Resume by id / most recent. |
@@ -232,7 +236,7 @@ fatal: Transport channel closed, when Auth(AuthorizationRequired)`, and a silent
 stderr error at all even after a fresh login). Diagnose definitively before blaming auth:
 
 ```bash
-RUST_LOG=debug grok -p "test" -m grok-build --disable-web-search 2>/tmp/grok-debug.log &
+RUST_LOG=debug grok -p "test" -m grok-4.5 --disable-web-search 2>/tmp/grok-debug.log &
 sleep 75; grep -c errorcode_502 /tmp/grok-debug.log
 ```
 
@@ -316,9 +320,9 @@ ZCode `--json` returns one object (live-captured shape, CLI 0.15.0):
 
 Extract with `jq -r '.response'`; resume later with `--resume "$(… | jq -r '.sessionId')"`.
 
-Grok `--output-format json`: extract with `jq -r '.text // .result'` (field name varies by
-version — inspect once if empty). `streaming-json` emits incremental events (files modified,
-commands run) for CI integration.
+Grok `--output-format json`: one object with keys `requestId`, `sessionId`, `stopReason`,
+`text`, `thought` (verified 0.2.91) — extract with `jq -r '.text'`. `streaming-json` emits
+incremental events (files modified, commands run) for CI integration.
 
 Codex `--json`: JSONL event stream on stdout. Simpler for a single final answer: use
 `-o /tmp/last.txt` to write only the last message, then read the file.
@@ -338,8 +342,8 @@ structured output for the precise reason. When capturing a piped tool's exit thr
 | Grok stderr noise: `AuthorizationRequired`, `Skipping MCP tool` (stdout still arrives) | Cosmetic startup noise + digit-prefixed MCP tool names | Pipe `2>/dev/null` |
 | Grok `-p` hangs 2+ min, no stdout (stderr may show `worker quit with fatal … Auth(AuthorizationRequired)`, or nothing) | Provider-side 502 from `cli-chat-proxy.grok.com` (CLI swallows it), or a stale cached token | Run the `RUST_LOG=debug` diagnosis in the Grok section: 502s in the log = provider outage, skip Grok and retry later; no 502s + fatal auth line = `grok login` + one retry. Wrap unattended calls in a timeout |
 | Grok surfaces unrelated tweets/blogs as "evidence" | Web search left on | Add `--disable-web-search` |
-| Grok answer seems shallow | Default model is not grok-build | Pass `-m grok-build` explicitly |
-| `--effort` has no visible effect on grok-build | grok-build bakes reasoning into Heavy mode | Omit the flag; do not fight it |
+| Grok: `Couldn't set model 'grok-build': Invalid params: "unknown model id"` | `grok-build` retired from the CLI at the grok-4.5 launch (2026-07-08) | Use `-m grok-4.5` |
+| Grok answer seems shallow | A lighter model (e.g. `grok-composer-2.5-fast`) was selected | Pass `-m grok-4.5` explicitly |
 | OpenCode `-f` file attach errors | Known `-f` issue on some versions | Pipe the prompt on stdin instead |
 | zcode: `Model config is missing. Create ~/.zcode/cli/config.json …` | No CLI config and no env vars | Apply Recipe A, B, or C above |
 | zcode config written but `model: Invalid input` in `~/.zcode/cli/log/` | `model.main` written as an object or bad ref | `model.main` must be a `provider/model` STRING, e.g. `"zai/glm-5.2"` |

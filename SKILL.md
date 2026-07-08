@@ -2,7 +2,7 @@
 name: headless-relay
 description: Headless handoff guide for running other AI models from inside an agent session (Claude Code, Codex CLI, OpenClaw, Hermes). Covers GPT (codex exec), GLM (opencode run or zcode --prompt), Grok (grok -p), and Claude (claude -p or a subagent) - inline vs file prompts, parallel multi-model consensus, JSON output, session resume, provider-terms compliance. Use for "ask codex", "ask GLM", "ask grok", "second opinion", "cross-model review", "run headless", "ask another model".
 license: MIT. Complete terms in LICENSE.txt
-metadata: {"version": "1.0.0"}
+metadata: {"version": "1.1.0"}
 ---
 
 # headless-relay
@@ -103,7 +103,7 @@ echo "your question here" | opencode run -m "zai-coding-plan/glm-5.2" --variant 
 zcode --prompt "your question here"
 
 # Grok — 2>/dev/null strips harmless MCP/auth startup noise on stderr
-grok -p "your question here" -m grok-build --disable-web-search 2>/dev/null
+grok -p "your question here" -m grok-4.5 --disable-web-search 2>/dev/null
 
 # Claude (headless subprocess)
 claude -p "your question here" --model fable
@@ -140,7 +140,7 @@ cat /tmp/handoff.md | opencode run -m "zai-coding-plan/glm-5.2" --variant max
 zcode --prompt "$(cat /tmp/handoff.md)"
 
 # Grok: takes a file flag directly (not stdin)
-grok --prompt-file /tmp/handoff.md -m grok-build --disable-web-search 2>/dev/null
+grok --prompt-file /tmp/handoff.md -m grok-4.5 --disable-web-search 2>/dev/null
 
 # Claude: command-substitute the file into the prompt arg
 claude -p "$(cat /tmp/handoff.md)" --model fable
@@ -163,7 +163,7 @@ run concurrently), then compare where they agree and diverge.
 ```bash
 codex exec < /tmp/handoff.md > /tmp/ans-gpt.md 2>/dev/null &
 cat /tmp/handoff.md | opencode run -m "zai-coding-plan/glm-5.2" --variant max > /tmp/ans-glm.md 2>/dev/null &
-grok --prompt-file /tmp/handoff.md -m grok-build --disable-web-search > /tmp/ans-grok.md 2>/dev/null &
+grok --prompt-file /tmp/handoff.md -m grok-4.5 --disable-web-search > /tmp/ans-grok.md 2>/dev/null &
 wait
 ```
 
@@ -223,7 +223,7 @@ Codex and Grok ship review affordances that beat a hand-written prompt for repo 
 
 ```bash
 codex exec review --uncommitted          # reviews staged + unstaged + untracked
-grok --check -p "review the diff" -m grok-build --disable-web-search 2>/dev/null
+grok --check -p "review the diff" -m grok-4.5 --disable-web-search 2>/dev/null
 ```
 
 ## Claude target: subprocess vs in-session subagent
@@ -269,6 +269,7 @@ while a same-provider second opinion should stay in-session as a subagent.
 | Grok stderr shows `AuthorizationRequired` / `Skipping MCP tool` but stdout arrives | Cosmetic startup noise — pipe `2>/dev/null` |
 | Grok `-p` prints nothing for 2+ minutes (stderr may show `worker quit with fatal: Transport channel closed, when Auth(AuthorizationRequired)`, or nothing at all) | The run hangs instead of exiting. Kill it; if the fatal auth line is present run `grok login` and retry once; if it hangs again the relay/service side is down — skip Grok and report it. Always wrap unattended grok calls in a timeout |
 | Grok cites unrelated tweets / web pages | Missing `--disable-web-search` |
+| Grok: `Couldn't set model 'grok-build': … "unknown model id"` | `grok-build` was retired from the CLI when grok-4.5 launched (July 2026) — use `-m grok-4.5` |
 | zcode: `Model config is missing. Create ~/.zcode/cli/config.json …` | One-time setup — follow the ZCode recipes in [references/cli-reference.md](references/cli-reference.md) |
 | `zcode login`: `OAuth response is not valid JSON` | Known open bug — skip login entirely; use the config-file or env-var recipe instead |
 | OpenCode `-f` file attach errors | Pipe via stdin instead (`cat file \| opencode run …`) |
