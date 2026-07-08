@@ -2,7 +2,7 @@
 name: headless-relay
 description: Headless handoff guide for running other AI models from inside an agent session (Claude Code, Codex CLI, OpenClaw, Hermes). Covers GPT (codex exec), GLM (opencode run or zcode --prompt), Grok (grok -p), and Claude (claude -p or a subagent) - inline vs file prompts, parallel multi-model consensus, JSON output, session resume, provider-terms compliance. Use for "ask codex", "ask GLM", "ask grok", "second opinion", "cross-model review", "run headless", "ask another model".
 license: MIT. Complete terms in LICENSE.txt
-metadata: {"version": "1.1.0"}
+metadata: {"version": "1.1.1"}
 ---
 
 # headless-relay
@@ -186,9 +186,14 @@ codex exec --sandbox workspace-write \
 
 `codex exec` is non-interactive and never prompts for approval. Do NOT pass
 `--ask-for-approval` — exec rejects it with `unexpected argument` (that flag belongs to
-interactive `codex`). `--full-auto` still parses as a hidden deprecated alias but still blocks
-the network — avoid it. OpenCode and Grok already run agentic with repo access in their default
-run mode; scope Grok down with `--disable-web-search` when you want diff-deterministic output.
+interactive `codex`). `--full-auto` still parses but is a hidden deprecated compat alias: it
+sets `--sandbox workspace-write` and pins approvals to `never` — it does NOT enable network,
+and it suppresses any config-driven approval escalation. Also note `codex exec` LOADS
+`~/.codex/config.toml` (`sandbox_mode`, `approval_policy`, reviewer features), so headless
+behavior varies per machine — pass explicit flags, or add `--ignore-user-config` when you need
+machine-independent runs. OpenCode and Grok already run agentic with repo access in their
+default run mode; scope Grok down with `--disable-web-search` when you want diff-deterministic
+output.
 
 ### Scenario E — structured JSON output for scripting
 

@@ -41,8 +41,20 @@ Subcommands: `codex exec resume [id | --last] [prompt]`, `codex exec review [--u
 
 **Approval flags do not exist on exec.** `codex exec` is non-interactive and never prompts, so
 it accepts no approval policy: `--ask-for-approval` fails with `unexpected argument` (it
-belongs to interactive `codex`). `--full-auto` still parses as a hidden deprecated alias but
-grants nothing extra and still blocks the network.
+belongs to interactive `codex`). `--full-auto` still parses but is a hidden deprecated compat
+alias (`removed_full_auto` in the source): it sets `sandbox_mode = "workspace-write"` and pins
+`approval_policy = "never"` — it does NOT enable network. Expect it to be removed the way
+`--ask-for-approval` was; use `--sandbox workspace-write` instead.
+
+**exec loads `~/.codex/config.toml` — headless behavior is machine-dependent.** A config with
+`sandbox_mode = "workspace-write"` makes even flag-less `codex exec` writable, and a config
+with `approval_policy = "on-request"` plus an auto-reviewer (e.g. `approvals_reviewer =
+"guardian_subagent"` with `features.guardian_approval`) can ESCALATE a failed sandboxed
+command and re-run it OUTSIDE the sandbox — live-verified: a network-blocked `curl` (exit 6)
+was auto-approved and re-run to a 200 with no network flag at all. This escalation is
+model-discretionary (not guaranteed per run), and `--full-auto` suppresses it by pinning
+approvals to `never`. For deterministic cross-machine behavior, pass explicit `--sandbox` +
+`-c` flags or add `--ignore-user-config` (auth still works).
 
 **Sandbox and network are independent axes.** `workspace-write` does NOT allow the network by
 default, so `gh` / `git fetch` / `curl` fail unless you add the config override:
@@ -336,6 +348,7 @@ structured output for the precise reason. When capturing a piped tool's exit thr
 | Symptom | Cause | Fix |
 |---------|-------|-----|
 | Codex: `unexpected argument '--ask-for-approval'` (or `--full-auto` warning) | exec is non-interactive; approval flags belong to interactive `codex` | Drop the flag; use `--sandbox` + the network `-c` override only |
+| Codex behaves differently on another machine (writes/network that "shouldn't" work) | exec loads `~/.codex/config.toml`; `on-request` + auto-reviewer configs can escalate failed commands out of the sandbox | Pass explicit `--sandbox`/`-c` flags, or `--ignore-user-config` for reproducible runs |
 | Codex "network access restricted", `gh`/`curl` fail | `workspace-write` blocks network by default | Add `-c 'sandbox_workspace_write.network_access=true'` |
 | Codex stops with a clarifying question instead of reviewing | Default read-only sandbox blocked a command it needed | Escalate sandbox only as far as needed; or pre-fetch data into the prompt file |
 | Prompt with backticks / `$` / newlines mangled or executed | Shell interpreted the inline `"…"` | Write to a file; feed via stdin, `--prompt-file`, or a quoted `"$(cat file)"` |
