@@ -300,7 +300,8 @@ Notes, all live-verified:
   concurrent CLIs (codex/opencode/grok) whose lanes run for more than a few seconds; solo and
   pairwise runs pass 100%, and a 5s stagger does not help. Timing/load-sensitive bug in agy
   1.1.0 — run the Gemini lane sequentially (before or after the burst), cap it with a timeout,
-  and retest on future agy releases.
+  and retest on future agy releases. Reported upstream with the full repro matrix:
+  github.com/google-antigravity/antigravity-cli/issues/573.
 - Baseline latency ~8s for a trivial prompt; agentic runs (tool calls) ~20s.
 - No stdin pipe (`flag needs an argument: -print`) — pass files as `agy -p "$(cat file)"`.
 - No JSON output format; stdout is plain text.
