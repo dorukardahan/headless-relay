@@ -293,8 +293,14 @@ the non-Google models are served through Google's platform. The reasoning tier i
 the model name; `"Gemini 3.1 Pro (High)"` is the top Gemini tier.
 
 Notes, all live-verified:
-- **The old Gemini CLI's per-user concurrency cap is gone**: three parallel `agy -p` runs
-  completed in 8s wall clock — identical to a single run. Safe in multi-model bursts.
+- **The old Gemini CLI's per-user API concurrency cap is gone**: three parallel `agy -p` runs
+  completed in 8s wall clock — identical to a single run.
+- **BUT do not launch agy inside a parallel burst with other model CLIs.** Bisected over 19
+  live runs (2026-07-09): `agy -p` hangs indefinitely (9/9) when started alongside 3+ other
+  concurrent CLIs (codex/opencode/grok) whose lanes run for more than a few seconds; solo and
+  pairwise runs pass 100%, and a 5s stagger does not help. Timing/load-sensitive bug in agy
+  1.1.0 — run the Gemini lane sequentially (before or after the burst), cap it with a timeout,
+  and retest on future agy releases.
 - Baseline latency ~8s for a trivial prompt; agentic runs (tool calls) ~20s.
 - No stdin pipe (`flag needs an argument: -print`) — pass files as `agy -p "$(cat file)"`.
 - No JSON output format; stdout is plain text.
@@ -405,5 +411,6 @@ structured output for the precise reason. When capturing a piped tool's exit thr
 | agy file operations land in `~/.gemini/antigravity-cli/scratch` | Antigravity's default working dir is its own scratch workspace, not your cwd | Pass `--add-dir /path/to/repo` (it becomes the working directory); use absolute paths in prompts |
 | agy: `flag needs an argument: -print` | stdin piping is not supported | Use `agy -p "$(cat file)"` — quoted command substitution passes the bytes verbatim |
 | agy modifies files you only wanted reviewed | Print mode runs tools unprompted (yolo-like) | Add `--mode plan` (advice-only) or `--sandbox` |
+| agy `-p` hangs forever inside a parallel multi-CLI burst | agy 1.1.0 timing/load bug when 3+ other model CLIs run concurrently (solo/pairwise reliable; stagger insufficient) | Run the Gemini lane sequentially around the burst; always cap agy with a timeout |
 | CLI missing or "not authenticated" | Not installed / logged out | Report it, skip that model; run `codex login` / `opencode auth login` / `grok login` as needed — do not substitute another model silently |
 | Long run hangs the shell tool | Tool-level timeout | Set an explicit timeout, or run in background and poll |

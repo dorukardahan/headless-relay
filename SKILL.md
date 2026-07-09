@@ -2,7 +2,7 @@
 name: headless-relay
 description: Headless handoff guide for running other AI models from inside an agent session (Claude Code, Codex CLI, OpenClaw, Hermes). Covers GPT (codex exec), GLM (opencode run or zcode --prompt), Grok (grok -p), Gemini (Antigravity agy -p), and Claude (claude -p or a subagent) - inline vs file prompts, parallel multi-model consensus, JSON output, session resume, provider-terms compliance. Use for "ask codex", "ask GLM", "ask grok", "ask gemini", "second opinion", "cross-model review", "run headless", "ask another model".
 license: MIT. Complete terms in LICENSE.txt
-metadata: {"version": "1.3.0"}
+metadata: {"version": "1.3.1"}
 ---
 
 # headless-relay
@@ -181,6 +181,11 @@ wait
 On a machine with ZCode instead of OpenCode, swap the GLM lane:
 `zcode --prompt "$(cat /tmp/handoff.md)" > /tmp/ans-glm.md 2>/dev/null &`
 
+Gemini caution: run the `agy` lane SEQUENTIALLY (before the burst or after it finishes), not
+inside it — agy 1.1.0 reliably wedges when started alongside 3+ other concurrent model CLIs
+(solo and pairwise runs are fine; a 5s stagger does not help). It is fast solo (~10-30s). See
+the Antigravity section of [references/cli-reference.md](references/cli-reference.md).
+
 Then read the answer files and present a merged view: shared findings first, then each model's
 unique points, then contradictions to resolve. A finding cited with a specific file:line by one
 model beats a vague agreement from the others — verify before dismissing it as an outlier.
@@ -292,6 +297,7 @@ while a same-provider second opinion should stay in-session as a subagent.
 | OpenCode `-f` file attach errors | Pipe via stdin instead (`cat file \| opencode run …`) |
 | agy reads/writes files in `~/.gemini/antigravity-cli/scratch` instead of your repo | Antigravity's default working dir is its own scratch workspace — pass `--add-dir /path/to/repo` (it becomes the working directory) |
 | agy: `flag needs an argument: -print` | No stdin pipe — use `agy -p "$(cat /tmp/handoff.md)"` |
+| agy `-p` never returns when launched inside a parallel multi-CLI burst | Known agy 1.1.0 timing bug (solo/pairwise runs are reliable) — run the Gemini lane sequentially around the burst, and always cap it with a timeout |
 | GLM cites a CI/workflow/env change not in the diff | Known GLM infra-hallucination — verify against the actual file before acting |
 | A CLI is missing or unauthenticated | Report it and skip that model; do not substitute another silently |
 | A non-Anthropic harness (OpenClaw / Hermes) triggered this skill | Apply the graded Claude gate: never reuse subscription auth in a foreign client, never do competing-model work; occasional handoffs into the genuine `claude -p` are tolerated today (keep volume low). When in doubt, use Codex / GLM / Grok / Gemini. See [references/anthropic-terms.md](references/anthropic-terms.md) |
