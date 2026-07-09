@@ -1,8 +1,8 @@
 ---
 name: headless-relay
-description: Headless handoff guide for running other AI models from inside an agent session (Claude Code, Codex CLI, OpenClaw, Hermes). Covers GPT (codex exec), GLM (opencode run or zcode --prompt), Grok (grok -p), and Claude (claude -p or a subagent) - inline vs file prompts, parallel multi-model consensus, JSON output, session resume, provider-terms compliance. Use for "ask codex", "ask GLM", "ask grok", "second opinion", "cross-model review", "run headless", "ask another model".
+description: Headless handoff guide for running other AI models from inside an agent session (Claude Code, Codex CLI, OpenClaw, Hermes). Covers GPT (codex exec), GLM (opencode run or zcode --prompt), Grok (grok -p), Gemini (Antigravity agy -p), and Claude (claude -p or a subagent) - inline vs file prompts, parallel multi-model consensus, JSON output, session resume, provider-terms compliance. Use for "ask codex", "ask GLM", "ask grok", "ask gemini", "second opinion", "cross-model review", "run headless", "ask another model".
 license: MIT. Complete terms in LICENSE.txt
-metadata: {"version": "1.1.1"}
+metadata: {"version": "1.2.0"}
 ---
 
 # headless-relay
@@ -13,13 +13,14 @@ orchestrating agent (Claude Code, Codex CLI, or another harness) writes the prom
 target model's headless CLI through its shell tool, reads the model's stdout, and summarizes
 the answer back. Follow these patterns exactly.
 
-## The four targets
+## The five targets
 
 | Target | CLI | Headless entry point | Auth / plan |
 |--------|-----|----------------------|-------------|
 | GPT | `codex` (OpenAI Codex CLI) | `codex exec` | ChatGPT plan or OpenAI API key (`codex login`) |
 | GLM | `opencode`, or `zcode` (ships inside the ZCode desktop app) | `opencode run` / `zcode --prompt` | Z.ai Coding Plan (API key or ZCode app login) |
 | Grok | `grok` (xAI Grok Build) | `grok -p` / `--single` | SuperGrok (`grok login`) |
+| Gemini | `agy` (Google Antigravity CLI — replaced the retired Gemini CLI) | `agy -p` / `--print` | Google account via the Antigravity app/CLI |
 | Claude | `claude` (Claude Code) | `claude -p`, or the harness's native subagent | Anthropic auth of the current session |
 
 ## Preflight: is the model available?
@@ -34,6 +35,7 @@ substitute a different model to fill the gap.
 | GLM via OpenCode | `command -v opencode` | `opencode auth list` shows a Z.AI credential |
 | GLM via ZCode | `command -v zcode` (add a PATH wrapper if only the app is installed) | `~/.zcode/cli/config.json` exists or `ZCODE_API_KEY` is set. `zcode login` is currently broken — see [references/cli-reference.md](references/cli-reference.md) |
 | Grok | `command -v grok` | `grok models` prints "You are not authenticated." when logged out. A logged-in state can still hit a fatal auth-refresh hang — see Troubleshooting |
+| Gemini via Antigravity | `command -v agy` | `agy models` lists the model menu when logged in; the default model comes from the user's Antigravity config |
 | Claude | in-session already (native subagent); `command -v claude` only for headless | current session auth |
 
 Rules:
@@ -77,6 +79,7 @@ harness (Codex, OpenClaw, Hermes) is exactly the trigger.
 | Claude | Anthropic blocks subscription routing through third-party harnesses (April 2026) — use a metered Anthropic API key, never a Pro/Max session. Commercial Terms D.4 bars competing-model development. Fable 5 detects frontier-LLM-dev tasks and hands them to Opus 4.8 (disclosed June 2026; originally silent, now a visible fallback). Detail: [references/anthropic-terms.md](references/anthropic-terms.md) |
 | GPT (Codex) | ChatGPT-plan OAuth from third-party harnesses is officially permitted (May 2026, OpenClaw explicitly endorsed). Plan credentials reach OpenAI models only. Using Output to develop competing models is banned (ToU, Jan 2026). |
 | Grok | xAI Acceptable Use Policy + Enterprise ToS prohibit using the Service or Output to develop competing models, and ban scraping, reselling, or distilling Output. |
+| Gemini (Antigravity) | Gemini API Additional Terms (updated March 2026) prohibit using the Services to develop models that compete with them, and ban reverse engineering / extracting / replicating components including model weights. Note the agy model menu also serves Claude and GPT-OSS models under Google's platform terms. |
 | GLM | Coding Plan is limited to officially supported tools — Claude Code, OpenCode, OpenClaw, and Hermes Agent are all on the current list. Open-weight (MIT), no sharp competing-model clause, but quota / fair-use enforcement is aggressive. |
 
 Two rules hold regardless of orchestrator. First, check the target provider's stance on
@@ -104,6 +107,9 @@ zcode --prompt "your question here"
 
 # Grok — 2>/dev/null strips harmless MCP/auth startup noise on stderr
 grok -p "your question here" -m grok-4.5 --disable-web-search 2>/dev/null
+
+# Gemini via Antigravity — model name is the display string from `agy models`
+agy -p "your question here" --model "Gemini 3.1 Pro (High)"
 
 # Claude (headless subprocess)
 claude -p "your question here" --model fable
@@ -142,6 +148,9 @@ zcode --prompt "$(cat /tmp/handoff.md)"
 # Grok: takes a file flag directly (not stdin)
 grok --prompt-file /tmp/handoff.md -m grok-4.5 --disable-web-search 2>/dev/null
 
+# Antigravity: no stdin mode — substitute the file into the arg
+agy -p "$(cat /tmp/handoff.md)"
+
 # Claude: command-substitute the file into the prompt arg
 claude -p "$(cat /tmp/handoff.md)" --model fable
 ```
@@ -164,6 +173,7 @@ run concurrently), then compare where they agree and diverge.
 codex exec < /tmp/handoff.md > /tmp/ans-gpt.md 2>/dev/null &
 cat /tmp/handoff.md | opencode run -m "zai-coding-plan/glm-5.2" --variant max > /tmp/ans-glm.md 2>/dev/null &
 grok --prompt-file /tmp/handoff.md -m grok-4.5 --disable-web-search > /tmp/ans-grok.md 2>/dev/null &
+agy -p "$(cat /tmp/handoff.md)" --model "Gemini 3.1 Pro (High)" > /tmp/ans-gemini.md 2>/dev/null &
 wait
 ```
 
@@ -203,6 +213,7 @@ output.
 | OpenCode | `--format json` | `jq` over the raw event JSON |
 | ZCode | `--json` | `jq -r '.response'`; session id = `.sessionId`, token usage under `.usage` |
 | Grok | `--output-format json` | `jq -r '.text // .result'` |
+| Antigravity | (none) | No JSON mode — stdout is plain text; capture and use it directly |
 | Claude | `--output-format json` | `jq -r '.result'`; session id = `.session_id`, cost = `.total_cost_usd` |
 
 ```bash
@@ -220,8 +231,8 @@ claude -p "now check the error paths" --resume "$sid"
 ```
 
 `codex exec resume --last`, `opencode run -c` (continue) or `-s <id>`, `grok -r [id]` /
-`grok -c`, `zcode --resume sess_<id>` / `zcode -c` are the equivalents. See
-[references/cli-reference.md](references/cli-reference.md).
+`grok -c`, `zcode --resume sess_<id>` / `zcode -c`, `agy -c` / `agy --conversation <id>` are
+the equivalents. See [references/cli-reference.md](references/cli-reference.md).
 
 ### Scenario G — built-in code review of the current repo
 Codex and Grok ship review affordances that beat a hand-written prompt for repo diffs:
@@ -278,6 +289,8 @@ while a same-provider second opinion should stay in-session as a subagent.
 | zcode: `Model config is missing. Create ~/.zcode/cli/config.json …` | One-time setup — follow the ZCode recipes in [references/cli-reference.md](references/cli-reference.md) |
 | `zcode login`: `OAuth response is not valid JSON` | Known open bug — skip login entirely; use the config-file or env-var recipe instead |
 | OpenCode `-f` file attach errors | Pipe via stdin instead (`cat file \| opencode run …`) |
+| agy reads/writes files in `~/.gemini/antigravity-cli/scratch` instead of your repo | Antigravity's default working dir is its own scratch workspace — pass `--add-dir /path/to/repo` (it becomes the working directory) |
+| agy: `flag needs an argument: -print` | No stdin pipe — use `agy -p "$(cat /tmp/handoff.md)"` |
 | GLM cites a CI/workflow/env change not in the diff | Known GLM infra-hallucination — verify against the actual file before acting |
 | A CLI is missing or unauthenticated | Report it and skip that model; do not substitute another silently |
 | A non-Anthropic harness (OpenClaw / Hermes) triggered this skill | Skip the Claude/`claude -p` branch entirely; use Codex / GLM / Grok. See the compliance gate and [references/anthropic-terms.md](references/anthropic-terms.md) |

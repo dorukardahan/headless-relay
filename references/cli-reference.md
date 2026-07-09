@@ -3,13 +3,15 @@
 Full per-CLI detail for `headless-relay`. Flags verified 2026-07-02 against installed
 binaries: codex-cli 0.142.5, opencode 1.14.31, claude (Claude Code) 2.1.198, zcode CLI 0.15.0
 (ZCode desktop app 3.2.2); Grok section re-verified 2026-07-08 on grok 0.2.91 (grok-4.5
-launch). Flags drift — re-check `--help` when a command errors with `unexpected argument`.
+launch); Antigravity section verified 2026-07-08 on agy 1.1.0. Flags drift — re-check
+`--help` when a command errors with `unexpected argument`.
 
 ## Contents
 - [GPT — codex exec](#gpt--codex-exec)
 - [GLM via OpenCode — opencode run](#glm-via-opencode--opencode-run)
 - [GLM via ZCode — zcode --prompt](#glm-via-zcode--zcode---prompt)
 - [Grok — grok headless](#grok--grok-headless)
+- [Gemini via Antigravity — agy print mode](#gemini-via-antigravity--agy-print-mode)
 - [Claude — claude print mode](#claude--claude-print-mode)
 - [Output-format shapes and jq parsing](#output-format-shapes-and-jq-parsing)
 - [Full troubleshooting](#full-troubleshooting)
@@ -266,6 +268,42 @@ resolution order: `model.api_key`, then `model.env_key`, then active session tok
 `XAI_API_KEY`. Note the CLI self-updates on login/startup — pin expectations to `grok --version`
 output, not memory.
 
+## Gemini via Antigravity — agy print mode
+
+Google retired the standalone Gemini CLI; its replacement is the Antigravity CLI, `agy`
+(install: `curl -fsSL https://antigravity.google/cli/install.sh | bash`; the old `gemini`
+binary may linger on PATH — do not use it). Auth comes from the Antigravity app/CLI Google
+login. All behavior below live-verified 2026-07-08 on agy 1.1.0.
+
+| Flag | Meaning |
+|------|---------|
+| `-p, --print <PROMPT>` | Run a single prompt non-interactively, print the response, exit. `--prompt` is an alias. |
+| `--print-timeout <dur>` | Print-mode wait cap, default `5m0s`. |
+| `--model <name>` | Display-string model name from `agy models`, e.g. `"Gemini 3.1 Pro (High)"`. Omit to use the user's configured default. |
+| `--add-dir <path>` | Add a directory to the workspace (repeatable) — it also BECOMES the working directory. Without it agy works in its own scratch dir, `~/.gemini/antigravity-cli/scratch`. |
+| `--mode <mode>` | `accept-edits`, `plan`. Use `plan` for advice-only runs. |
+| `--sandbox` | Enable terminal restrictions. |
+| `--dangerously-skip-permissions` | Auto-approve tool permission prompts. |
+| `-c, --continue` / `--conversation <id>` | Resume the most recent conversation / a specific one. |
+| `-i, --prompt-interactive` | Run a prompt then stay interactive — NOT headless; avoid in scripts. |
+
+Model menu (`agy models`, 2026-07-08): Gemini 3.5 Flash (Low/Medium/High), Gemini 3.1 Pro
+(Low/High), Claude Sonnet 4.6 (Thinking), Claude Opus 4.6 (Thinking), GPT-OSS 120B (Medium) —
+the non-Google models are served through Google's platform. The reasoning tier is baked into
+the model name; `"Gemini 3.1 Pro (High)"` is the top Gemini tier.
+
+Notes, all live-verified:
+- **The old Gemini CLI's per-user concurrency cap is gone**: three parallel `agy -p` runs
+  completed in 8s wall clock — identical to a single run. Safe in multi-model bursts.
+- Baseline latency ~8s for a trivial prompt; agentic runs (tool calls) ~20s.
+- No stdin pipe (`flag needs an argument: -print`) — pass files as `agy -p "$(cat file)"`.
+- No JSON output format; stdout is plain text.
+- Print mode executes shell/file/network tools WITHOUT prompting (file write, `curl` (200),
+  and authenticated `gh` all ran unprompted) — treat it like a yolo mode. Constrain with
+  `--mode plan` or `--sandbox` for advice-only handoffs.
+- Working-directory gotcha: file operations land in the scratch workspace unless you pass
+  `--add-dir /path/to/repo`; reads of absolute paths outside the workspace worked.
+
 ## Claude — claude print mode
 
 `claude -p` / `--print` runs Claude Code non-interactively: same agent loop, prints a result,
@@ -364,5 +402,8 @@ structured output for the precise reason. When capturing a piped tool's exit thr
 | GLM cites a CI yml / vercel.json / env change absent from the diff | GLM tends to hallucinate infrastructure claims | Verify against the real file before acting |
 | GLM confuses similar functions across files | Known limitation | Cross-check its findings against actual file paths |
 | A model returns empty JSON `.text`/`.result`/`.response` | Field name differs by version | Inspect the raw JSON once; adjust the `jq` path |
+| agy file operations land in `~/.gemini/antigravity-cli/scratch` | Antigravity's default working dir is its own scratch workspace, not your cwd | Pass `--add-dir /path/to/repo` (it becomes the working directory); use absolute paths in prompts |
+| agy: `flag needs an argument: -print` | stdin piping is not supported | Use `agy -p "$(cat file)"` — quoted command substitution passes the bytes verbatim |
+| agy modifies files you only wanted reviewed | Print mode runs tools unprompted (yolo-like) | Add `--mode plan` (advice-only) or `--sandbox` |
 | CLI missing or "not authenticated" | Not installed / logged out | Report it, skip that model; run `codex login` / `opencode auth login` / `grok login` as needed — do not substitute another model silently |
 | Long run hangs the shell tool | Tool-level timeout | Set an explicit timeout, or run in background and poll |
