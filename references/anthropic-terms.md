@@ -3,20 +3,23 @@
 Rationale and citations for the compliance gate in SKILL.md. The gate matters because this
 skill is cross-platform: its `SKILL.md` can be installed into an OpenClaw, Nous Research /
 Hermes, Codex, or Gemini agent's skills directory. When a non-Anthropic harness triggers it,
-the Claude branch (`claude -p` or a Claude subagent) must be skipped. Route to Codex, GLM, or
-Grok instead. Facts below verified against primary sources on 2026-07-02.
+apply the GRADED gate below: the hard bans are absolute; the first-party-binary path is
+tolerated today but explicitly flagged for change. Facts verified against primary sources on
+2026-07-02; graded stance adopted 2026-07-09.
 
-## The rule
+## The rule (graded)
 
-| Orchestrator triggering this skill | Claude branch |
-|-----------------------------------|-----------------------|
+| Orchestrator / pattern | Claude branch |
+|------------------------|---------------|
 | First-party Anthropic Claude Code (the interactive session or its own subagents) | Allowed — any branch |
-| OpenClaw / Nous Research (Hermes) / any non-Anthropic agent harness | Forbidden — use Codex / GLM / Grok only |
-| Any workflow whose purpose is to build or train a competing model | Forbidden regardless of harness |
+| Non-Anthropic harness using subscription OAuth in its OWN client (the OpenClaw April-2026 pattern), or spoofing / reverse-engineering Claude Code's auth | FORBIDDEN — technically blocked since April 2026; a foreign client's only route is a metered Anthropic API key |
+| Non-Anthropic orchestrator shelling out to the GENUINE first-party `claude -p` binary, using the user's own login, at occasional second-opinion volume | TOLERATED today — Anthropic's announced pool split (which would have metered exactly this) was paused June 15, 2026, and `claude -p` plus third-party ACP apps were explicitly kept on subscription. Keep volume low; Anthropic has signaled intent to meter programmatic usage and promised advance notice — watch for reinstatement |
+| Always-on / high-volume programmatic pipelines on a Pro/Max plan (any caller) | Avoid — this recreates the capacity pattern behind the April 2026 crackdown and is the announced split's explicit target; use a metered API key for sustained automation |
+| Any workflow whose purpose is to build or train a competing model | FORBIDDEN regardless of harness or auth (Commercial Terms D.4) |
 
 Never reverse-engineer the Claude Code harness or its auth to tap a Pro/Max plan from another
-tool. A non-first-party harness that needs Claude must use a metered Anthropic API key, not a
-subscription session — and even then, not for competing-model development.
+tool — that ban is absolute. And no route, subscription or API key, is available for
+competing-model development.
 
 ## Reason 1 — subscription auth cannot flow through third-party harnesses
 
@@ -38,9 +41,17 @@ uses optimizations like prompt caching that third-party harnesses bypass.
   subscription limits, and Anthropic says it will give advance notice before any future change.
   Watch for reinstatement.
 
-Implication: the `claude -p` branch of this skill draws on local Claude Code auth. Firing it
-from a non-Anthropic harness routes subscription capacity through a third-party tool — the
-exact pattern Anthropic blocked in April 2026.
+Implication — two distinct patterns, treated differently. (a) Extracting Claude Code's
+subscription OAuth into a NON-Anthropic client (what OpenClaw did) is what Anthropic
+technically blocked in April 2026 — hard no. (b) Shelling out to the genuine first-party
+`claude` binary keeps the entire first-party stack intact (client, prompt caching,
+accounting), and Anthropic's own June 2026 communications kept `claude -p` and third-party
+ACP apps on subscription when the pool split was paused — so (b) is tolerated today. The
+capacity-economics concern behind Cherny's statement still applies to VOLUME: an always-on
+agent hammering `claude -p` recreates the load pattern the crackdown targeted, and the
+announced-then-paused split shows Anthropic intends to meter programmatic use eventually.
+Practical guidance: occasional second-opinion handoffs via `claude -p` are fine today; do not
+build sustained automation on a Pro/Max plan; expect metering, with notice.
 
 ## Reason 2 — Commercial Terms D.4 (use restrictions)
 

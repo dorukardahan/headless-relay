@@ -2,7 +2,7 @@
 name: headless-relay
 description: Headless handoff guide for running other AI models from inside an agent session (Claude Code, Codex CLI, OpenClaw, Hermes). Covers GPT (codex exec), GLM (opencode run or zcode --prompt), Grok (grok -p), Gemini (Antigravity agy -p), and Claude (claude -p or a subagent) - inline vs file prompts, parallel multi-model consensus, JSON output, session resume, provider-terms compliance. Use for "ask codex", "ask GLM", "ask grok", "ask gemini", "second opinion", "cross-model review", "run headless", "ask another model".
 license: MIT. Complete terms in LICENSE.txt
-metadata: {"version": "1.2.0"}
+metadata: {"version": "1.3.0"}
 ---
 
 # headless-relay
@@ -76,19 +76,20 @@ harness (Codex, OpenClaw, Hermes) is exactly the trigger.
 
 | Target | Constraints from a non-native harness |
 |--------|----------------------------------------|
-| Claude | Anthropic blocks subscription routing through third-party harnesses (April 2026) — use a metered Anthropic API key, never a Pro/Max session. Commercial Terms D.4 bars competing-model development. Fable 5 detects frontier-LLM-dev tasks and hands them to Opus 4.8 (disclosed June 2026; originally silent, now a visible fallback). Detail: [references/anthropic-terms.md](references/anthropic-terms.md) |
+| Claude | Graded gate. HARD bans: reusing subscription OAuth in a non-Anthropic client (blocked April 2026 — foreign clients need a metered API key), reverse-engineering the harness/auth, and competing-model development (Commercial Terms D.4). TOLERATED today: shelling out to the genuine first-party `claude -p` with the user's own login at occasional second-opinion volume — Anthropic's pool split that would meter this was paused June 2026; keep volume low, avoid always-on pipelines on a Pro/Max plan. Fable 5 hands frontier-LLM-dev tasks to Opus 4.8 (visible fallback). Detail: [references/anthropic-terms.md](references/anthropic-terms.md) |
 | GPT (Codex) | ChatGPT-plan OAuth from third-party harnesses is officially permitted (May 2026, OpenClaw explicitly endorsed). Plan credentials reach OpenAI models only. Using Output to develop competing models is banned (ToU, Jan 2026). |
 | Grok | xAI Acceptable Use Policy + Enterprise ToS prohibit using the Service or Output to develop competing models, and ban scraping, reselling, or distilling Output. |
 | Gemini (Antigravity) | Gemini API Additional Terms (updated March 2026) prohibit using the Services to develop models that compete with them, and ban reverse engineering / extracting / replicating components including model weights. Note the agy model menu also serves Claude and GPT-OSS models under Google's platform terms. |
 | GLM | Coding Plan is limited to officially supported tools — Claude Code, OpenCode, OpenClaw, and Hermes Agent are all on the current list. Open-weight (MIT), no sharp competing-model clause, but quota / fair-use enforcement is aggressive. |
 
 Two rules hold regardless of orchestrator. First, check the target provider's stance on
-subscription auth from non-native harnesses: Anthropic blocks it (metered API key only), OpenAI
-explicitly permits it, Z.ai ties the plan to its supported-tools list. Second, never use any
-model to build or train a competing model or to reverse-engineer a harness. A Nous Research /
-Hermes agent working on Hermes models is therefore barred from the Claude AND Grok branches for
-that work; GLM (open-weight, and Hermes Agent is officially supported) is the most permissive
-target.
+subscription auth from non-native harnesses: Anthropic blocks foreign CLIENTS on subscription
+creds (metered API key for those) while currently tolerating occasional calls into the genuine
+`claude -p` binary; OpenAI explicitly permits plan OAuth in third-party harnesses; Z.ai ties
+the plan to its supported-tools list. Second, never use any model to build or train a
+competing model or to reverse-engineer a harness. A Nous Research / Hermes agent working on
+Hermes models is therefore barred from the Claude AND Grok branches for that work; GLM
+(open-weight, and Hermes Agent is officially supported) is the most permissive target.
 
 ## Copy-paste baseline commands
 
@@ -293,6 +294,6 @@ while a same-provider second opinion should stay in-session as a subagent.
 | agy: `flag needs an argument: -print` | No stdin pipe — use `agy -p "$(cat /tmp/handoff.md)"` |
 | GLM cites a CI/workflow/env change not in the diff | Known GLM infra-hallucination — verify against the actual file before acting |
 | A CLI is missing or unauthenticated | Report it and skip that model; do not substitute another silently |
-| A non-Anthropic harness (OpenClaw / Hermes) triggered this skill | Skip the Claude/`claude -p` branch entirely; use Codex / GLM / Grok. See the compliance gate and [references/anthropic-terms.md](references/anthropic-terms.md) |
+| A non-Anthropic harness (OpenClaw / Hermes) triggered this skill | Apply the graded Claude gate: never reuse subscription auth in a foreign client, never do competing-model work; occasional handoffs into the genuine `claude -p` are tolerated today (keep volume low). When in doubt, use Codex / GLM / Grok / Gemini. See [references/anthropic-terms.md](references/anthropic-terms.md) |
 
 See [references/cli-reference.md](references/cli-reference.md) for the full table.
