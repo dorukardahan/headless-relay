@@ -1,8 +1,9 @@
 # CLI reference — headless flags per model
 
 Full per-CLI detail for `headless-relay`. Flags verified 2026-07-02 against installed
-binaries: codex-cli 0.142.5, opencode 1.14.31, claude (Claude Code) 2.1.198, zcode CLI 0.15.0
-(ZCode desktop app 3.2.2); Grok section re-verified 2026-07-08 on grok 0.2.91 (grok-4.5
+binaries: opencode 1.14.31, claude (Claude Code) 2.1.198, zcode CLI 0.15.0 (ZCode desktop app
+3.2.2, recipes re-verified on app 3.3.3); GPT section re-verified 2026-07-10 on codex-cli
+0.144.0 (GPT-5.6 launch); Grok section re-verified 2026-07-08 on grok 0.2.91 (grok-4.5
 launch); Antigravity section verified 2026-07-08 on agy 1.1.0. Flags drift — re-check
 `--help` when a command errors with `unexpected argument`.
 
@@ -24,8 +25,8 @@ no argument is given (or the argument is `-`). If both are supplied, stdin is ap
 
 | Flag | Meaning |
 |------|---------|
-| `-m, --model <MODEL>` | Model id, e.g. `gpt-5.5`. Omit to use the `~/.codex/config.toml` default. |
-| `-c, --config <key=value>` | Override a config value (TOML). E.g. `-c model_reasoning_effort="xhigh"`. |
+| `-m, --model <MODEL>` | Model id, e.g. `gpt-5.6-sol`. Omit to use the `~/.codex/config.toml` default. |
+| `-c, --config <key=value>` | Override a config value (TOML). E.g. `-c model_reasoning_effort="ultra"`. |
 | `-s, --sandbox <MODE>` | `read-only` (default), `workspace-write`, `danger-full-access`. |
 | `--dangerously-bypass-approvals-and-sandbox` | No sandbox. EXTREMELY DANGEROUS; isolated containers only. |
 | `-C, --cd <DIR>` | Working root for the agent. |
@@ -66,9 +67,14 @@ codex exec --sandbox workspace-write \
   -c 'sandbox_workspace_write.network_access=true' "<task>"
 ```
 
-Reasoning effort: set via config, e.g. `-c model="gpt-5.5" -c model_reasoning_effort="xhigh"`.
-Check `~/.codex/config.toml` for the machine's defaults; pass explicit `-c` overrides when
-reproducibility matters.
+Models (GPT-5.6 launch, 2026-07-09): `gpt-5.6-sol` (frontier agentic coding), `gpt-5.6-terra`
+(balanced), `gpt-5.6-luna` (fast/affordable); `gpt-5.5` and `gpt-5.4` moved to legacy.
+Reasoning effort ladder is now `low | medium | high | xhigh | max | ultra` — `ultra` is
+"maximum reasoning with automatic task delegation" (codex may fan out its own subagents).
+Two load-bearing notes, live-verified on 0.144.0: the 5.6 models DEFAULT TO `low` effort, so
+always pass `-c model="gpt-5.6-sol" -c model_reasoning_effort="ultra"` (or your chosen tier)
+explicitly for review-grade output; and the 0.142.x exec flag semantics are unchanged
+(`--ask-for-approval` still rejected, network still requires the `-c` override above).
 
 Piping example (feed a `gh` log in, post the summary out):
 
@@ -396,6 +402,7 @@ structured output for the precise reason. When capturing a piped tool's exit thr
 | Codex behaves differently on another machine (writes/network that "shouldn't" work) | exec loads `~/.codex/config.toml`; `on-request` + auto-reviewer configs can escalate failed commands out of the sandbox | Pass explicit `--sandbox`/`-c` flags, or `--ignore-user-config` for reproducible runs |
 | Codex "network access restricted", `gh`/`curl` fail | `workspace-write` blocks network by default | Add `-c 'sandbox_workspace_write.network_access=true'` |
 | Codex stops with a clarifying question instead of reviewing | Default read-only sandbox blocked a command it needed | Escalate sandbox only as far as needed; or pre-fetch data into the prompt file |
+| Codex answer seems shallow on a 5.6 model | GPT-5.6 models default to LOW reasoning effort | Pass `-c model_reasoning_effort="high"` / `"ultra"` explicitly (or pin it in config.toml) |
 | Prompt with backticks / `$` / newlines mangled or executed | Shell interpreted the inline `"…"` | Write to a file; feed via stdin, `--prompt-file`, or a quoted `"$(cat file)"` |
 | Grok stderr noise: `AuthorizationRequired`, `Skipping MCP tool` (stdout still arrives) | Cosmetic startup noise + digit-prefixed MCP tool names | Pipe `2>/dev/null` |
 | Grok `-p` hangs 2+ min, no stdout (stderr may show `worker quit with fatal … Auth(AuthorizationRequired)`, or nothing) | Provider-side 502 from `cli-chat-proxy.grok.com` (CLI swallows it), or a stale cached token | Run the `RUST_LOG=debug` diagnosis in the Grok section: 502s in the log = provider outage, skip Grok and retry later; no 502s + fatal auth line = `grok login` + one retry. Wrap unattended calls in a timeout |
