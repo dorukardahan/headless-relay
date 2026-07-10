@@ -381,12 +381,30 @@ Three findings from bisecting the failure modes (codex-cli 0.144.0):
   even a non-ultra run may wander into the openai-docs skill.
 macOS has no `timeout`; wrap with `perl -e 'alarm shift; exec @ARGV' <secs> <cmd>` as above.
 
-### Gemini (agy) — no native headless image tool
+### Gemini (agy) — native generate_image, works headless (image only)
 
-`agy models` / `agy --help` surface no image-generation tool, and an agy image attempt did not
-produce a native result. Gemini image generation (Nano Banana / `google/gemini-3-pro-image`)
-requires the OpenRouter API path — which is metered and, per operator policy, must not be used
-without explicit approval. There is no headless-CLI Gemini image path today.
+agy has a built-in `generate_image` tool. Like Grok's and Codex's media tools it is NOT a CLI
+flag (so it does not show in `agy models` / `agy --help`) — you drive it through the prompt.
+Verified 2026-07-10 on agy 1.1.0: a solo `agy -p` run generated an orange-triangle JPG into
+the target dir in ~34s. No API key and no OpenRouter needed — the Google-account login covers
+it (agy also self-reports the tool and offers a 0G Compute text-to-image route as an
+alternative). No native VIDEO tool (agy self-reports video is unsupported).
+
+```bash
+cd /path/to/output-dir
+agy -p "Call your generate_image tool immediately — do not research, spawn subagents, or use a
+   skill. Generate a <description>. Save it to the current directory. Print exactly:
+   SAVED: <absolute path>." --model "Gemini 3.1 Pro (High)" --add-dir "$PWD" </dev/null
+```
+
+Caveat: run the image lane **solo / sequentially** — the agy parallel-burst hang
+(google-antigravity/antigravity-cli#573) applies to media runs too. `--add-dir "$PWD"` (or the
+repo path) makes agy write to your dir instead of its scratch workspace; close stdin
+(`</dev/null`) as with the text lane. An earlier "agy has no image tool" reading was wrong: it
+came from checking `agy models`/`--help` (which never list runtime tools) and from a
+concurrency-hung attempt in a parallel burst — solo, the native tool works. The OpenRouter
+`google/gemini-3-pro-image` path remains a separate, metered, operator-gated fallback, not a
+requirement.
 
 ### GLM / Claude
 

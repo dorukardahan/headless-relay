@@ -2,7 +2,7 @@
 name: headless-relay
 description: Headless handoff guide for running other AI models from inside an agent session (Claude Code, Codex CLI, OpenClaw, Hermes). Covers GPT (codex exec), GLM (opencode run or zcode --prompt), Grok (grok -p), Gemini (Antigravity agy -p), and Claude (claude -p or a subagent) - inline vs file prompts, parallel multi-model consensus, JSON output, session resume, image/video generation, provider-terms compliance. Use for "ask codex", "ask GLM", "ask grok", "ask gemini", "second opinion", "cross-model review", "generate an image", "run headless", "ask another model".
 license: MIT. Complete terms in LICENSE.txt
-metadata: {"version": "1.5.2"}
+metadata: {"version": "1.5.3"}
 ---
 
 # headless-relay
@@ -270,17 +270,24 @@ perl -e 'alarm shift; exec @ARGV' 480 \
   -c model_reasoning_effort="max" "$(cat /tmp/img-brief.md)" </dev/null
 ```
 
-Both briefs must say: "call your image_gen tool immediately — do NOT research docs, spawn
-subagents, or use any skill — generate <description>, save to the current directory, print
-`SAVED: <path>`." Codex also mirrors outputs to `~/.codex/generated_images/<session>/`.
+# Gemini (agy): native generate_image tool, works headless. Run it SOLO (the agy parallel-burst
+# hang applies to media too); the Google-account login covers it — no API key, no OpenRouter.
+cd /path/to/output-dir
+agy -p "$(cat /tmp/img-brief.md)" --model "Gemini 3.1 Pro (High)" --add-dir "$PWD" </dev/null
+```
+
+Briefs must say: "call your image tool immediately — do NOT research docs, spawn subagents, or
+use any skill — generate <description>, save to the current directory, print `SAVED: <path>`."
+Tool names differ: Grok/Codex = `image_gen`, agy = `generate_image`. Codex also mirrors
+outputs to `~/.codex/generated_images/<session>/`.
 
 Per-target support (detail in [references/cli-reference.md](references/cli-reference.md)):
 
 | Target | Headless media generation |
 |--------|---------------------------|
 | Grok | YES — `image_gen` / `image_edit` / `image_to_video` / `reference_to_video`, Imagine backend, writes to cwd (verified via `grok --prompt-file`) |
-| GPT (Codex) | YES — built-in `image_gen` via `codex exec`; avoid `ultra` (auto-delegation spiral, `max` works in ~55s), close stdin (`</dev/null`), and use a direct "call the tool now" prompt (verified: blue-circle + green-square PNGs generated headless) |
-| Gemini (agy) | NOT native headless — `agy` exposed no image tool; Gemini image gen needs the OpenRouter `google/gemini-3-pro-image` API path, which is metered and should only be used with explicit operator approval |
+| GPT (Codex) | YES — built-in `image_gen` via `codex exec`; avoid `ultra` (auto-delegation spiral, `max` works in ~55s), close stdin (`</dev/null`), direct "call the tool now" prompt (verified: blue-circle + green-square PNGs) |
+| Gemini (agy) | YES (image only) — native `generate_image`, no API key / no OpenRouter (Google login covers it), ~34s, writes to cwd (verified: orange-triangle JPG). Run SOLO — the agy parallel-burst hang applies. No native video tool |
 | GLM / Claude | No headless image generation in these CLIs |
 
 ## Claude target: subprocess vs in-session subagent
