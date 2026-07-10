@@ -2,7 +2,7 @@
 name: headless-relay
 description: Headless handoff guide for running other AI models from inside an agent session (Claude Code, Codex CLI, OpenClaw, Hermes). Covers GPT (codex exec), GLM (opencode run or zcode --prompt), Grok (grok -p), Gemini (Antigravity agy -p), and Claude (claude -p or a subagent) - inline vs file prompts, parallel multi-model consensus, JSON output, session resume, image/video generation, provider-terms compliance. Use for "ask codex", "ask GLM", "ask grok", "ask gemini", "second opinion", "cross-model review", "generate an image", "run headless", "ask another model".
 license: MIT. Complete terms in LICENSE.txt
-metadata: {"version": "1.5.0"}
+metadata: {"version": "1.5.1"}
 ---
 
 # headless-relay
@@ -249,26 +249,35 @@ grok --check -p "review the diff" -m grok-4.5 --disable-web-search 2>/dev/null
 ```
 
 ### Scenario H — image / video generation (not just text)
-Some targets can generate media, not only reason over text. Only **Grok works headlessly** for
-this today (live-verified). Instruct the model to use its media tool, save to the current
-directory, and print the path — then read that path back.
+**Grok and Codex** both generate media headlessly (live-verified). The pattern is the same for
+both: instruct the model to call its image tool IMMEDIATELY, save to the current directory, and
+print the path — then read that path back.
 
 ```bash
 # Grok: native Imagine-backed media tools (image_gen, image_edit, image_to_video,
-# reference_to_video). Runs in its default agentic mode (NOT --disable-web-search-only read
-# mode blocks tools — but web search off is fine; the media tools are separate).
+# reference_to_video). --disable-web-search does NOT disable the media tools (separate).
 cd /path/to/output-dir
 grok --prompt-file /tmp/img-brief.md -m grok-4.5 --disable-web-search
-# brief tells it: "use image_gen to generate <description>, save to cwd, print SAVED: <path>"
+
+# GPT (Codex): built-in image_gen. Use LOW/MEDIUM effort and a direct prompt — at `ultra`
+# effort codex auto-delegates subagents and spirals into doc lookups instead of calling the
+# tool (a 43-min no-output hang in testing). macOS has no `timeout`; use perl's alarm.
+cd /path/to/output-dir
+perl -e 'alarm shift; exec @ARGV' 480 \
+  codex exec --sandbox workspace-write -c model="gpt-5.6-sol" \
+  -c model_reasoning_effort="medium" "$(cat /tmp/img-brief.md)"
 ```
 
-Per-target support (detail + the interactive-only paths in
-[references/cli-reference.md](references/cli-reference.md)):
+Both briefs must say: "call your image_gen tool immediately — do NOT research docs, spawn
+subagents, or use any skill — generate <description>, save to the current directory, print
+`SAVED: <path>`." Codex also mirrors outputs to `~/.codex/generated_images/<session>/`.
+
+Per-target support (detail in [references/cli-reference.md](references/cli-reference.md)):
 
 | Target | Headless media generation |
 |--------|---------------------------|
 | Grok | YES — `image_gen` / `image_edit` / `image_to_video` / `reference_to_video`, Imagine backend, writes to cwd (verified via `grok --prompt-file`) |
-| GPT (Codex) | NO via `codex exec` — the built-in `image_gen` tool is an INTERACTIVE-Codex feature; a headless exec image request hung indefinitely in testing. Use the interactive Codex CLI/app for GPT image gen |
+| GPT (Codex) | YES — built-in `image_gen` via `codex exec`; use low/medium effort + a direct "call the tool, don't research/delegate" prompt or it spirals (verified: blue-circle PNG generated headless) |
 | Gemini (agy) | NOT native headless — `agy` exposed no image tool; Gemini image gen needs the OpenRouter `google/gemini-3-pro-image` API path, which is metered and should only be used with explicit operator approval |
 | GLM / Claude | No headless image generation in these CLIs |
 

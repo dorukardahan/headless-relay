@@ -351,15 +351,30 @@ web search) — keep it on for determinism. To ground the output in your own bra
 reference images via the prompt/attachments and use `reference_to_video` or an edit flow.
 Live-verified: a `grok --prompt-file` run generated `blue-circle.jpg` into the target dir.
 
-### GPT (Codex) — image_gen is INTERACTIVE-ONLY
+### GPT (Codex) — image_gen works headless (with an effort caveat)
 
-The Codex CLI/app ships a built-in `image_gen` tool (modes `generate` / `edit` /
-`generate-batch`; default mode needs no `OPENAI_API_KEY`; a CLI fallback `scripts/image_gen.py`
-uses `gpt-image-2`). Generated files land in `~/.codex/generated_images/<session>/exec-<uuid>.png`.
-BUT this is an **interactive-Codex** capability: a headless `codex exec` image request hung
-indefinitely (killed at 43 min, no output, no file) in testing on codex-cli 0.144.0. For GPT
-image generation, drive the interactive `codex` CLI/app, not `codex exec`. Treat headless
-Codex image gen as unavailable until proven otherwise on a future release.
+The Codex CLI ships a built-in `image_gen` tool (modes `generate` / `edit` / `generate-batch`;
+default mode needs no `OPENAI_API_KEY`; a CLI fallback `scripts/image_gen.py` uses
+`gpt-image-2`). It works headless via `codex exec` — verified 2026-07-10 on codex-cli 0.144.0,
+which generated a blue-circle PNG into the target dir. Output also mirrors to
+`~/.codex/generated_images/<session>/exec-<uuid>.png`.
+
+```bash
+cd /path/to/output-dir
+perl -e 'alarm shift; exec @ARGV' 480 \
+  codex exec --sandbox workspace-write -c model="gpt-5.6-sol" \
+  -c model_reasoning_effort="medium" \
+  "Call your image_gen tool immediately — do not research docs, spawn subagents, or use any
+   skill. Generate a <description>. Save it to the current directory as out.png. Print exactly:
+   SAVED: <absolute path>."
+```
+
+The one trap (this is what a naive run hits): at `ultra` effort the model auto-delegates
+subagents and, prompted loosely, disappears into doc/skill lookups instead of calling the
+tool — a first attempt at `ultra` with a research-flavored prompt hung 43 minutes with no
+output. Two rules fix it: **use `low`/`medium` reasoning effort for image gen**, and make the
+prompt an imperative "call the tool now, don't research/delegate." macOS has no `timeout`;
+wrap with `perl -e 'alarm shift; exec @ARGV' <secs> <cmd>` as above.
 
 ### Gemini (agy) — no native headless image tool
 
