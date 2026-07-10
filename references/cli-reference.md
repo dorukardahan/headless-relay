@@ -363,18 +363,23 @@ which generated a blue-circle PNG into the target dir. Output also mirrors to
 cd /path/to/output-dir
 perl -e 'alarm shift; exec @ARGV' 480 \
   codex exec --sandbox workspace-write -c model="gpt-5.6-sol" \
-  -c model_reasoning_effort="medium" \
+  -c model_reasoning_effort="max" \
   "Call your image_gen tool immediately — do not research docs, spawn subagents, or use any
    skill. Generate a <description>. Save it to the current directory as out.png. Print exactly:
-   SAVED: <absolute path>."
+   SAVED: <absolute path>." </dev/null
 ```
 
-The one trap (this is what a naive run hits): at `ultra` effort the model auto-delegates
-subagents and, prompted loosely, disappears into doc/skill lookups instead of calling the
-tool — a first attempt at `ultra` with a research-flavored prompt hung 43 minutes with no
-output. Two rules fix it: **use `low`/`medium` reasoning effort for image gen**, and make the
-prompt an imperative "call the tool now, don't research/delegate." macOS has no `timeout`;
-wrap with `perl -e 'alarm shift; exec @ARGV' <secs> <cmd>` as above.
+Three findings from bisecting the failure modes (codex-cli 0.144.0):
+- **Reasoning effort is NOT the bottleneck.** `max` (one tier below `ultra`) generated a PNG
+  in ~55s. The only bad tier is **`ultra`**, whose "automatic task delegation" makes the model
+  spawn subagents and disappear into doc/skill lookups instead of calling the tool (a 43-min
+  no-output hang). Use `max` or lower for image gen.
+- **Close stdin.** With the prompt passed as a positional argument, `codex exec` can block on
+  `Reading additional input from stdin...` and never start. Append `</dev/null` (the same run
+  that hung then completed in 55s once stdin was closed).
+- **Prompt must be imperative:** "call the tool now, don't research/delegate/use skills," or
+  even a non-ultra run may wander into the openai-docs skill.
+macOS has no `timeout`; wrap with `perl -e 'alarm shift; exec @ARGV' <secs> <cmd>` as above.
 
 ### Gemini (agy) — no native headless image tool
 
