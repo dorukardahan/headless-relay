@@ -18,6 +18,7 @@ ZCode desktop app's bundled CLI, whose official login flow is currently broken.
 | `SKILL.md` | Core instructions (loaded by the agent) |
 | `references/cli-reference.md` | Per-CLI flag tables, ZCode setup recipes, output shapes, troubleshooting |
 | `references/anthropic-terms.md` | Provider-terms compliance detail with citations |
+| `references/reprompter-relay.md` | Pairing recipe: run a prompt-engineering skill (e.g. RePrompter) before relaying |
 | `LICENSE.txt` | MIT license |
 
 ## Install
