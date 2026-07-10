@@ -317,6 +317,61 @@ Notes, all live-verified:
 - Working-directory gotcha: file operations land in the scratch workspace unless you pass
   `--add-dir /path/to/repo`; reads of absolute paths outside the workspace worked.
 
+## Media generation (image / video)
+
+A few targets can generate media, not just text. Only Grok does it headlessly today. All
+notes live-verified 2026-07-10.
+
+### Grok — native media tools (headless, works)
+
+`grok -p` / `--prompt-file` in the default agentic mode exposes four Imagine-backed media
+tools (confirmed by asking grok to list them, and by the CHANGELOG line "Image edits now use
+the higher-quality Imagine model"):
+
+| Tool | Purpose |
+|------|---------|
+| `image_gen` | text → new image |
+| `image_edit` | edit / transform an existing image |
+| `image_to_video` | single image → video |
+| `reference_to_video` | multi-image references + prompt → video |
+
+There is no dedicated flag — you drive the tool through the prompt. Grok has write access to
+the cwd in its default run mode, so the reliable pattern is:
+
+```bash
+cd /path/to/output-dir       # grok writes generated files here
+grok --prompt-file /tmp/img-brief.md -m grok-4.5 --disable-web-search
+```
+
+where the brief instructs: "Use your `image_gen` tool to generate <description>. Save the file
+in the current working directory. Print the saved absolute path on its own line prefixed with
+`SAVED:`. If you have no image tool, print `IMAGE TOOL: NONE`." Grok prints `SAVED: <path>`;
+read that path. `--disable-web-search` does NOT disable the media tools (they are separate from
+web search) — keep it on for determinism. To ground the output in your own brand, pass
+reference images via the prompt/attachments and use `reference_to_video` or an edit flow.
+Live-verified: a `grok --prompt-file` run generated `blue-circle.jpg` into the target dir.
+
+### GPT (Codex) — image_gen is INTERACTIVE-ONLY
+
+The Codex CLI/app ships a built-in `image_gen` tool (modes `generate` / `edit` /
+`generate-batch`; default mode needs no `OPENAI_API_KEY`; a CLI fallback `scripts/image_gen.py`
+uses `gpt-image-2`). Generated files land in `~/.codex/generated_images/<session>/exec-<uuid>.png`.
+BUT this is an **interactive-Codex** capability: a headless `codex exec` image request hung
+indefinitely (killed at 43 min, no output, no file) in testing on codex-cli 0.144.0. For GPT
+image generation, drive the interactive `codex` CLI/app, not `codex exec`. Treat headless
+Codex image gen as unavailable until proven otherwise on a future release.
+
+### Gemini (agy) — no native headless image tool
+
+`agy models` / `agy --help` surface no image-generation tool, and an agy image attempt did not
+produce a native result. Gemini image generation (Nano Banana / `google/gemini-3-pro-image`)
+requires the OpenRouter API path — which is metered and, per operator policy, must not be used
+without explicit approval. There is no headless-CLI Gemini image path today.
+
+### GLM / Claude
+
+No image or video generation in `opencode` / `zcode` / `claude -p`. Text only.
+
 ## Claude — claude print mode
 
 `claude -p` / `--print` runs Claude Code non-interactively: same agent loop, prints a result,

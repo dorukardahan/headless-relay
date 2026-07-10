@@ -7,9 +7,9 @@ target model's CLI (`codex exec`, `opencode run`, `zcode --prompt`, `grok -p`, `
 `claude -p`), reads stdout, and reports back. Five target lanes: GPT, GLM, Grok, Gemini
 (via Google's Antigravity CLI), and Claude. Includes a preflight availability gate, a
 provider-terms compliance gate for non-native harnesses, parallel multi-model consensus,
-JSON output parsing, session resume, and live-verified troubleshooting — including working
-setup recipes for the ZCode desktop app's bundled CLI, whose official login flow is
-currently broken.
+JSON output parsing, session resume, headless image/video generation (Grok's Imagine-backed
+media tools), and live-verified troubleshooting — including working setup recipes for the
+ZCode desktop app's bundled CLI, whose official login flow is currently broken.
 
 ## What's inside
 

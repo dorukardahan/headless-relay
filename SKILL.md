@@ -1,8 +1,8 @@
 ---
 name: headless-relay
-description: Headless handoff guide for running other AI models from inside an agent session (Claude Code, Codex CLI, OpenClaw, Hermes). Covers GPT (codex exec), GLM (opencode run or zcode --prompt), Grok (grok -p), Gemini (Antigravity agy -p), and Claude (claude -p or a subagent) - inline vs file prompts, parallel multi-model consensus, JSON output, session resume, provider-terms compliance. Use for "ask codex", "ask GLM", "ask grok", "ask gemini", "second opinion", "cross-model review", "run headless", "ask another model".
+description: Headless handoff guide for running other AI models from inside an agent session (Claude Code, Codex CLI, OpenClaw, Hermes). Covers GPT (codex exec), GLM (opencode run or zcode --prompt), Grok (grok -p), Gemini (Antigravity agy -p), and Claude (claude -p or a subagent) - inline vs file prompts, parallel multi-model consensus, JSON output, session resume, image/video generation, provider-terms compliance. Use for "ask codex", "ask GLM", "ask grok", "ask gemini", "second opinion", "cross-model review", "generate an image", "run headless", "ask another model".
 license: MIT. Complete terms in LICENSE.txt
-metadata: {"version": "1.4.0"}
+metadata: {"version": "1.5.0"}
 ---
 
 # headless-relay
@@ -247,6 +247,30 @@ Codex and Grok ship review affordances that beat a hand-written prompt for repo 
 codex exec review --uncommitted          # reviews staged + unstaged + untracked
 grok --check -p "review the diff" -m grok-4.5 --disable-web-search 2>/dev/null
 ```
+
+### Scenario H — image / video generation (not just text)
+Some targets can generate media, not only reason over text. Only **Grok works headlessly** for
+this today (live-verified). Instruct the model to use its media tool, save to the current
+directory, and print the path — then read that path back.
+
+```bash
+# Grok: native Imagine-backed media tools (image_gen, image_edit, image_to_video,
+# reference_to_video). Runs in its default agentic mode (NOT --disable-web-search-only read
+# mode blocks tools — but web search off is fine; the media tools are separate).
+cd /path/to/output-dir
+grok --prompt-file /tmp/img-brief.md -m grok-4.5 --disable-web-search
+# brief tells it: "use image_gen to generate <description>, save to cwd, print SAVED: <path>"
+```
+
+Per-target support (detail + the interactive-only paths in
+[references/cli-reference.md](references/cli-reference.md)):
+
+| Target | Headless media generation |
+|--------|---------------------------|
+| Grok | YES — `image_gen` / `image_edit` / `image_to_video` / `reference_to_video`, Imagine backend, writes to cwd (verified via `grok --prompt-file`) |
+| GPT (Codex) | NO via `codex exec` — the built-in `image_gen` tool is an INTERACTIVE-Codex feature; a headless exec image request hung indefinitely in testing. Use the interactive Codex CLI/app for GPT image gen |
+| Gemini (agy) | NOT native headless — `agy` exposed no image tool; Gemini image gen needs the OpenRouter `google/gemini-3-pro-image` API path, which is metered and should only be used with explicit operator approval |
+| GLM / Claude | No headless image generation in these CLIs |
 
 ## Claude target: subprocess vs in-session subagent
 
