@@ -18,6 +18,7 @@ ZCode desktop app's bundled CLI, whose official login flow is currently broken.
 | `SKILL.md` | Core instructions (loaded by the agent) |
 | `references/cli-reference.md` | Per-CLI flag tables, ZCode setup recipes, output shapes, troubleshooting |
 | `references/anthropic-terms.md` | Provider-terms compliance detail with citations |
+| `references/custom-targets.md` | Connect your own targets (local models via Ollama/LM Studio/MLX, any one-shot CLI) through `~/.agents/relay-targets.json` |
 | `LICENSE.txt` | MIT license |
 
 ## Install
