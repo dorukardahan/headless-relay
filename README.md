@@ -22,14 +22,19 @@ ZCode desktop app's bundled CLI, whose official login flow is currently broken.
 
 ## Install
 
-Copy (or clone) the `headless-relay/` directory into your agent's skills directory:
+headless-relay is a plain [Agent Skill](https://agentskills.io) — one `SKILL.md` plus
+references. It runs in **any agent that reads Agent Skills and can execute shell commands**,
+not just the ones named below. Copy (or clone) the `headless-relay/` directory into your
+agent's skills directory:
 
 | Platform | User-wide skills directory |
 |----------|---------------------------|
 | Claude Code | `~/.claude/skills/headless-relay/` (project: `.claude/skills/`) |
 | OpenAI Codex CLI | `~/.agents/skills/headless-relay/` (repo: `.agents/skills/`; legacy `~/.codex/skills/` still works) |
+| xAI Grok Build CLI | `~/.grok/skills/headless-relay/` — Grok also auto-loads `~/.claude/skills/` via its Claude compatibility path, so a Claude Code install covers Grok too |
 | OpenClaw | `~/.openclaw/skills/headless-relay/` (or `<workspace>/skills/`; also scans `~/.agents/skills/`) |
 | Nous Research Hermes | `~/.hermes/skills/headless-relay/` (also scans `~/.agents/skills/`) |
+| Cursor, ZCode, and other agentskills.io-compatible runtimes | check your agent's skills directory convention; the skill has no platform-specific syntax |
 
 Example:
 

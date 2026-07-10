@@ -1,8 +1,8 @@
 ---
 name: headless-relay
-description: Headless handoff guide for running other AI models from inside an agent session (Claude Code, Codex CLI, OpenClaw, Hermes). Covers GPT (codex exec), GLM (opencode run or zcode --prompt), Grok (grok -p), Gemini (Antigravity agy -p), and Claude (claude -p or a subagent) - inline vs file prompts, parallel multi-model consensus, JSON output, session resume, image/video generation, provider-terms compliance. Use for "ask codex", "ask GLM", "ask grok", "ask gemini", "second opinion", "cross-model review", "generate an image", "run headless", "ask another model".
+description: Headless handoff guide for running other AI models from inside an agent session (any Agent Skills runtime - Claude Code, Codex, Grok Build, Cursor, OpenClaw, Hermes). Covers GPT (codex exec), GLM (opencode run or zcode --prompt), Grok (grok -p), Gemini (Antigravity agy -p), and Claude (claude -p or a subagent) - inline vs file prompts, parallel multi-model consensus, JSON output, session resume, image/video generation, provider-terms compliance. Use for "ask codex", "ask GLM", "ask grok", "ask gemini", "second opinion", "cross-model review", "generate an image", "run headless", "ask another model".
 license: MIT. Complete terms in LICENSE.txt
-metadata: {"version": "1.5.4"}
+metadata: {"version": "1.5.5"}
 ---
 
 # headless-relay
