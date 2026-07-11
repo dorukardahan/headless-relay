@@ -49,6 +49,18 @@ Rules:
   app; there is no separately installable ZCode CLI, and the npm packages named `zcode` /
   `zcode-cli` are unrelated third-party stubs — never install them.
 
+## Custom targets
+
+Users can connect additional one-shot model CLIs — local models (Ollama, LM
+Studio, Apple MLX) or other providers — by declaring them in
+`~/.agents/relay-targets.json`. Read
+[references/custom-targets.md](references/custom-targets.md) the first time a
+session needs the target list: each entry carries its own binary/auth preflight
+and an invoke template, and joins every flow in this skill (offers, consensus
+bursts) as a first-class lane. The preflight and compliance rules above apply to
+custom targets unchanged. The registry is user-authored configuration: only read
+it — never create, edit, or repair it on the user's behalf.
+
 ## Compliance gate: check the orchestrator and the target
 
 This skill is portable — it may run inside Claude Code, Codex CLI, or an OpenClaw / Nous
@@ -323,6 +335,7 @@ while a same-provider second opinion should stay in-session as a subagent.
 | [references/cli-reference.md](references/cli-reference.md) | Full per-CLI flag tables, model ids, ZCode setup recipes, output-format shapes, session resume, sandbox/network detail, troubleshooting |
 | [references/anthropic-terms.md](references/anthropic-terms.md) | Compliance detail: Anthropic subscription-routing block, Commercial Terms D.4, Fable 5 safeguards, enforcement history, plus the OpenAI / xAI / Z.ai / Google provider-terms matrix, with citations |
 | [references/reprompter-relay.md](references/reprompter-relay.md) | Pairing recipe: run a prompt-engineering skill (e.g. RePrompter) before relaying a nontrivial task; documents the RePrompter handoff contract |
+| [references/custom-targets.md](references/custom-targets.md) | User-connected targets: `~/.agents/relay-targets.json` registry for local models (Ollama, LM Studio, MLX) and other one-shot CLIs — field contract, preflight, security rules |
 
 ## Troubleshooting (core)
 
