@@ -1,15 +1,37 @@
 # headless-relay
 
-An [Agent Skill](https://agentskills.io) that teaches a coding agent to hand a task off to a
-DIFFERENT AI model headlessly, without leaving the session. The user says "ask Codex", "get
-GLM's opinion", "run this by Grok" — the orchestrating agent writes the prompt, runs the
-target model's CLI (`codex exec`, `opencode run`, `zcode --prompt`, `grok -p`, `agy -p`,
-`claude -p`), reads stdout, and reports back. Five target lanes: GPT, GLM, Grok, Gemini
-(via Google's Antigravity CLI), and Claude. Includes a preflight availability gate, a
-provider-terms compliance gate for non-native harnesses, parallel multi-model consensus,
-JSON output parsing, session resume, headless image/video generation (Grok's Imagine-backed
-media tools), and live-verified troubleshooting — including working setup recipes for the
-ZCode desktop app's bundled CLI, whose official login flow is currently broken.
+headless-relay is an [Agent Skill](https://agentskills.io) that lets your coding agent use
+the other AI models installed on your machine, without you leaving the session. You say
+"ask Codex what it thinks of this function", "get a second opinion on this bug from GLM and
+Grok", or "have Gemini generate an image for this post" — your agent quietly runs the right
+tool in the background, reads the answer, and reports back to you. No new accounts, no API
+juggling: it drives the AI tools you already have, with the logins you already use.
+
+It works in any coding agent that reads Agent Skills and can run shell commands — Claude
+Code, OpenAI Codex CLI, xAI Grok, Cursor, OpenClaw, Nous Research Hermes and friends. Five
+model lanes ship ready to use (GPT, GLM, Grok, Gemini, Claude), and you can plug in your
+own, including local models running through Ollama, LM Studio, or Apple MLX. Installation
+is a single `git clone`; everything else on this page is detail for when you need it.
+
+## What it can do
+
+- **Second opinions** — hand a diff, a bug, a PR review, or a design question to GPT, GLM,
+  Grok, Gemini, or Claude
+- **Consensus** — send the same prompt to several models in parallel and compare answers
+- **Image generation** — headless, through Grok, Codex, or Gemini; the skill documents each
+  CLI's quirks (Grok also does video)
+- **Scripting** — JSON output parsing and session resume for multi-turn work
+- **Safety rails** — a preflight gate (is the CLI installed and logged in?) and a
+  provider-terms compliance gate for non-native harnesses
+- **Custom targets** — add any one-shot CLI as a lane (local models included) via a small
+  JSON registry, contributed by [@AytuncYildizli](https://github.com/AytuncYildizli)
+
+## Pairs well with RePrompter
+
+A lazy prompt relayed to another model is still a lazy prompt.
+[RePrompter](https://github.com/AytuncYildizli/reprompter) structures your prompt first,
+then hands it to headless-relay for delivery — quality in, quality out. The pairing recipe
+lives in `references/reprompter-relay.md`.
 
 ## What's inside
 
@@ -19,6 +41,7 @@ ZCode desktop app's bundled CLI, whose official login flow is currently broken.
 | `references/cli-reference.md` | Per-CLI flag tables, ZCode setup recipes, output shapes, troubleshooting |
 | `references/anthropic-terms.md` | Provider-terms compliance detail with citations |
 | `references/custom-targets.md` | Connect your own targets (local models via Ollama/LM Studio/MLX, any one-shot CLI) through `~/.agents/relay-targets.json` |
+| `references/reprompter-relay.md` | Pairing recipe for [RePrompter](https://github.com/AytuncYildizli/reprompter): structure the prompt first, then relay it |
 | `LICENSE.txt` | MIT license |
 
 ## Install
