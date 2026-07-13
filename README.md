@@ -13,16 +13,31 @@ model lanes ship ready to use (GPT, GLM, Grok, Gemini, Claude), and you can plug
 own, including local models running through Ollama, LM Studio, or Apple MLX. Installation
 is a single `git clone`; everything else on this page is detail for when you need it.
 
+> ### ⚠️ Security: the Grok lane and your repository
+>
+> The xAI Grok Build CLI, run inside a git repository, uploads your **entire repo: full git
+> history and all tracked files, including a tracked `.env`**, to xAI cloud storage, regardless
+> of which files the model reads. This is confirmed by xAI's own Grok account on X and by independent
+> wire capture, and it is **not** stopped by `--disable-web-search` or by telling the model not to
+> read files. As of v2.0.0 this skill runs every Grok call **fail-closed**: isolated in an empty
+> non-git directory, never in your repo, and it refuses rather than risk leaking. (That isolation
+> stops the upload because a git bundle can only come from a git repo; we could not measure it
+> directly while xAI keeps the feature server-disabled, so SECURITY.md states it as a sound
+> inference, not a lab result.) Repo-context work is routed to Codex, Gemini, GLM, or Claude, which
+> a wire-test showed keep your repo local. If you have already used Grok Build in a real repo, read
+> **[SECURITY.md](SECURITY.md)**.
+
 ## What it can do
 
 - **Second opinions**: hand a diff, a bug, a PR review, or a design question to GPT, GLM,
   Grok, Gemini, or Claude
 - **Consensus**: send the same prompt to several models in parallel and compare answers
-- **Image generation**: headless, through Grok, Codex, or Gemini; the skill documents each
-  CLI's quirks (Grok also does video)
+- **Image / video generation**: headless, through Codex or Gemini (local) or Grok (isolated);
+  Grok is the only lane that also does video. The skill documents each CLI's quirks
 - **Scripting**: JSON output parsing and session resume for multi-turn work
-- **Safety rails**: a preflight gate (is the CLI installed and logged in?) and a
-  provider-terms compliance gate for non-native harnesses
+- **Safety rails**: a preflight gate (installed + logged in?), a provider-terms compliance gate
+  for non-native harnesses, and a **fail-closed data-egress guard for Grok** (see the security
+  note above and [SECURITY.md](SECURITY.md))
 - **Custom targets**: add any one-shot CLI as a lane (local models included) via a small
   JSON registry, contributed by [@AytuncYildizli](https://github.com/AytuncYildizli)
 
@@ -38,10 +53,12 @@ lives in `references/reprompter-relay.md`.
 | File | Purpose |
 |------|---------|
 | `SKILL.md` | Core instructions (loaded by the agent) |
+| `SECURITY.md` | Grok whole-repo upload: threat, primary sources, xAI's response, the wire-test, and hardening/migration for anyone who already ran Grok |
 | `references/cli-reference.md` | Per-CLI flag tables, ZCode setup recipes, output shapes, troubleshooting |
 | `references/anthropic-terms.md` | Provider-terms compliance detail with citations |
 | `references/custom-targets.md` | Connect your own targets (local models via Ollama/LM Studio/MLX, any one-shot CLI) through `~/.agents/relay-targets.json` |
 | `references/reprompter-relay.md` | Pairing recipe for [RePrompter](https://github.com/AytuncYildizli/reprompter): structure the prompt first, then relay it |
+| `scripts/regression-grok-safety.sh` | Deterministic guard that fails if the Grok isolation safeguard or its security anchors regress |
 | `LICENSE.txt` | MIT license |
 
 ## Install
@@ -73,7 +90,8 @@ At least one target-model CLI installed and authenticated:
 - `codex` (OpenAI Codex CLI) with a ChatGPT plan or API key
 - `opencode` with a Z.ai Coding Plan credential, and/or the ZCode desktop app (its bundled
   `zcode` command works headlessly after a one-time setup, see `references/cli-reference.md`)
-- `grok` (xAI Grok Build) with a SuperGrok login
+- `grok` (xAI Grok Build) with a SuperGrok login. Note: the skill runs Grok isolated (never in
+  your repo) because Grok Build uploads the whole repo to xAI. See [SECURITY.md](SECURITY.md)
 - `agy` (Google Antigravity CLI, the Gemini CLI's replacement) with a Google login.
   Install: `curl -fsSL https://antigravity.google/cli/install.sh | bash`
 - `claude` (Claude Code), only usable as a TARGET when the orchestrator is first-party
@@ -92,8 +110,9 @@ a two-check gate (orchestrator identity, target-provider terms) and a citations 
 
 MIT, see `LICENSE.txt`. Command behavior was live-verified 2026-07-02 against codex-cli
 0.142.5, opencode 1.14.31, claude 2.1.198, and ZCode 3.2.2 (CLI 0.15.0); the Grok lane was
-re-verified 2026-07-08 on grok 0.2.91 with grok-4.5, then 2026-07-13 on grok 0.2.99 (the
-availability check was reworked: `grok models` can print "not authenticated" on a merely
-expired cached token while still listing models in the same output, so the skill now reads the
-model list rather than that header); the Gemini lane was verified 2026-07-08 on Antigravity
-agy 1.1.0. CLIs drift fast, so re-verify flags when something errors.
+re-verified 2026-07-08 on grok 0.2.91 with grok-4.5, then 2026-07-13 on grok 0.2.99 (two things
+that day: the availability check was reworked because `grok models` can print "not authenticated"
+on a merely-expired cached token while still listing models in the same output; and a data-egress
+wire-test drove the v2.0.0 Grok isolation policy, see [SECURITY.md](SECURITY.md)); the Gemini
+lane was verified 2026-07-08 on Antigravity agy 1.1.0. CLIs drift fast, so re-verify flags when
+something errors.

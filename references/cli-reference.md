@@ -222,6 +222,78 @@ UNVERIFIED; only the paid-plan `builtin:zai` / `builtin:zai-coding-plan` bridge 
 
 ## Grok — grok headless
 
+### ⚠️ Data egress: Grok uploads the whole repo — isolation is mandatory
+
+Run inside a git repository, Grok Build packages the **entire tracked repo as a git bundle (full
+commit history + every tracked file, including a tracked `.env`)** and uploads it to xAI's Google
+Cloud Storage bucket `grok-code-session-traces` (`POST /v1/storage`), separate from and
+independent of the files the model reads on the model-turn channel (`/v1/responses` on
+`cli-chat-proxy.grok.com`). Not stopped by `--disable-web-search`, deny rules, a "don't read
+files" prompt, or the "Improve the model" toggle. Confirmed by xAI's Grok account on X
+(status 2076298375150911623) and by cereblab's mitmproxy capture
+(github.com/cereblab/grok-build-exfil-repro; gist dc9a40bc26120f4540e4e09b75ffb547), which
+recovered a never-read canary from the uploaded bundle. Only untracked / gitignored-and-never-
+committed files stay out of the bundle; a tracked `.env` and any file ever committed (even if
+later deleted) are in it. See [../SECURITY.md](../SECURITY.md) for the full write-up.
+
+**Wire-test, 2026-07-13, grok 0.2.99, this-machine** (method: whole-machine en0 egress delta on a
+synthetic canary repo carrying a 19 MB incompressible never-read blob; grok cross-checked via its
+own `trace.upload.decision` log; positive control: a 10 MB POST measured 11.5 MB, so the method
+catches multi-MB uploads; baseline noise ~0.25 MB):
+
+| Lane | cwd | egress | whole-repo bundle? |
+|------|-----|-------:|--------------------|
+| grok 0.2.99 (control) | inside canary repo | 0.25 MB | NO |
+| grok 0.2.99 | isolated non-git dir | 0.27 MB | NO |
+| codex 0.144.1 | inside canary repo | 0.51 MB | NO |
+| GLM / opencode | inside canary repo | 0.17 MB | NO |
+| Gemini / agy | inside canary repo | 0.31 MB | NO |
+
+Both grok runs logged `trace.upload.decision`: `uploads_enabled=False`, `upload_reason=feature_off`,
+`trace_upload_source=remote`, `has_remote_settings=True`, `data_collection_disabled=False`. So the
+upload is currently **off, but purely via a revocable server-side flag** — no local setting is
+responsible and the capability is still in the 0.2.99 client. xAI can re-enable it for any account
+or version at any time (and other accounts / enterprise states may already have it on). The xAI CLI
+changelog (0.2.94→0.2.99) says nothing about upload/telemetry/privacy: there is no documented
+client fix. **Do not rely on the current "off" state.** Codex, GLM (opencode), and Gemini (agy) sent
+no whole-repo bundle in the same test — they are the safe lanes for repo-context work.
+
+**Because isolation could not be positively demonstrated** (the feature was server-suppressed, so
+in-repo and isolated both showed no bundle, and there is no local force-enable to test against), the
+skill's isolation guarantee rests on the architectural fact that a git bundle can only be built from
+a git repo: an empty non-git working directory has no repo to bundle. Logically sound; re-verify
+with the wire-test above if xAI re-enables the feature.
+
+**Mandatory rule:** never run `grok` from the caller's repo, `$HOME`, or any dir with real data.
+Every call runs in a fresh empty non-git temp dir (context via `-p`/`--prompt-file` only), fail-
+closed if that cannot be guaranteed:
+
+```bash
+GROK_ISO="$(mktemp -d "${TMPDIR:-/tmp}/grok-iso.XXXXXX")"
+if [ -z "$GROK_ISO" ] || git -C "$GROK_ISO" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  # mktemp failed (empty var → cd no-op → Grok would run in the caller's repo), or the temp
+  # dir landed inside a git repo (e.g. TMPDIR points into one). Either way, do not run Grok.
+  echo "grok-relay: cannot isolate; refusing to run Grok" >&2
+else
+  ( cd "$GROK_ISO" && grok -p "…" -m grok-4.5 --disable-web-search 2>/dev/null )
+fi
+[ -n "$GROK_ISO" ] && rm -rf "$GROK_ISO"
+```
+
+**Per-user hardening (optional, defense-in-depth — never a substitute for isolation).** These are
+retention/telemetry controls, not a promise the data never transmits, and the config keys are
+**community-reported, not in xAI's official settings docs**, wire-verified only on 0.2.93, and may
+change per version — verify per version, treat as unverified:
+- In-CLI **`/privacy`** (official) toggles data retention and, per xAI, deletes previously synced
+  data. Retention, not transmission. Consumer opt-out is **not** ZDR — official ZDR is Team/
+  Enterprise-only (docs.x.ai/build/enterprise).
+- `~/.grok/config.toml`: `[harness] disable_codebase_upload = true`, `[telemetry] trace_upload =
+  false`, `[features] telemetry = false` (community-reported). To confirm a control is LOCAL, run
+  Grok once and check the `trace.upload.decision` log shows `trace_upload_source=config` or `env` —
+  `source=remote` is not local protection. The skill only READS user config; it never writes it.
+- The official `[tools] respect_gitignore=true` limits search/read tools only; it does **not** stop
+  the whole-repo bundle.
+
 Headless via `-p`. Use `-m grok-4.5` — xAI's coding/agents frontier model (launched
 2026-07-08, trained with Cursor; 500K context; reasoning-effort supported, default `high`).
 It is the CLI default on 0.2.91, but pass `-m` explicitly anyway: defaults drift, and the
@@ -243,7 +315,7 @@ as a CLI model.
 | `--check` | Append a self-verification loop to the prompt (headless only). |
 | `-r, --resume [id]` / `-c, --continue` | Resume by id / most recent. |
 | `--verbatim` | Send the prompt exactly as given. |
-| `--cwd <dir>` | Working directory. |
+| `--cwd <dir>` | Working directory. **Relevant to the data-egress safeguard: the repo Grok bundles is the one at/above its working directory. `--cwd` alone was not proven sufficient — the tested-safe pattern is to `cd` into a fresh non-git temp dir (see the isolation block above) so there is no repo to bundle.** |
 | `--always-approve` | Auto-approve tool executions (write mode). Omit for read-only audits. |
 
 `grok agent` runs Grok without the interactive UI; subcommands `stdio` (ACP), `headless`
@@ -256,8 +328,15 @@ fatal: Transport channel closed, when Auth(AuthorizationRequired)`, and a silent
 stderr error at all even after a fresh login). Diagnose definitively before blaming auth:
 
 ```bash
-RUST_LOG=debug grok -p "test" -m grok-4.5 --disable-web-search 2>/tmp/grok-debug.log &
-sleep 75; grep -c errorcode_502 /tmp/grok-debug.log
+# Run this diagnostic ISOLATED + fail-closed (it is a real grok -p — see the isolation block).
+GROK_ISO="$(mktemp -d "${TMPDIR:-/tmp}/grok-iso.XXXXXX")"
+if [ -z "$GROK_ISO" ] || git -C "$GROK_ISO" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  echo "grok-relay: cannot isolate; refusing Grok" >&2
+else
+  ( cd "$GROK_ISO" && RUST_LOG=debug grok -p "test" -m grok-4.5 --disable-web-search 2>/tmp/grok-debug.log ) &
+  GROK_PID=$!; sleep 75; grep -c errorcode_502 /tmp/grok-debug.log; kill "$GROK_PID" 2>/dev/null
+fi
+[ -n "$GROK_ISO" ] && rm -rf "$GROK_ISO"
 ```
 
 A nonzero count means xAI's inference proxy (`cli-chat-proxy.grok.com`) is returning Cloudflare
@@ -310,7 +389,10 @@ token is current, confirming it simply mirrors process-start state.)
 Walk this ladder in order and stop at the first verdict:
 
 1. `command -v grok` fails → **not installed**.
-2. Run `grok models` bounded (`perl -e 'alarm shift; exec @ARGV' 40 grok models`). If the
+2. Run `grok models` **isolated + fail-closed** and bounded
+   (`GI="$(mktemp -d "${TMPDIR:-/tmp}/grok-iso.XXXXXX")"; if [ -z "$GI" ] || git -C "$GI" rev-parse --is-inside-work-tree >/dev/null 2>&1; then echo "grok-relay: cannot isolate; refusing" >&2; else ( cd "$GI" && perl -e 'alarm shift; exec @ARGV' 40 grok models ); fi; [ -n "$GI" ] && rm -rf "$GI"`).
+   It is only a catalog fetch, but isolate it with the same guard so rule #1 (never run `grok` in
+   the repo) has no exception. If the
    output lists models — a `Default model:` line or an `Available models:` block — Grok is
    **available**, whether the header says "You are logged in" OR "You are not authenticated".
    The catalog was just fetched over an authenticated connection; the expired token, if any,
@@ -325,8 +407,15 @@ Walk this ladder in order and stop at the first verdict:
    call — at most one, never a retry loop:
 
    ```bash
-   perl -e 'alarm shift; exec @ARGV' 120 \
-     grok -p "Reply with exactly GROK_OK and nothing else." -m grok-4.5 --disable-web-search
+   # Run the sentinel ISOLATED + fail-closed — it is a real grok -p and would otherwise bundle the repo.
+   GROK_ISO="$(mktemp -d "${TMPDIR:-/tmp}/grok-iso.XXXXXX")"
+   if [ -z "$GROK_ISO" ] || git -C "$GROK_ISO" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+     echo "grok-relay: cannot isolate; refusing Grok" >&2
+   else
+     ( cd "$GROK_ISO" && perl -e 'alarm shift; exec @ARGV' 120 \
+         grok -p "Reply with exactly GROK_OK and nothing else." -m grok-4.5 --disable-web-search )
+   fi
+   [ -n "$GROK_ISO" ] && rm -rf "$GROK_ISO"
    ```
 
    If the session is about to send Grok a real prompt anyway, skip the sentinel and run that
@@ -410,21 +499,33 @@ the higher-quality Imagine model"):
 | `image_to_video` | single image → video |
 | `reference_to_video` | multi-image references + prompt → video |
 
-There is no dedicated flag — you drive the tool through the prompt. Grok has write access to
-the cwd in its default run mode, so the reliable pattern is:
+There is no dedicated flag — you drive the tool through the prompt. Grok is the **only** lane with
+video (`image_to_video` / `reference_to_video`). But the same **data-egress rule applies to media**:
+running Grok in a repo uploads the whole repo (see the isolation block at the top of this section).
+So generate in an isolated non-git temp dir and move the artifact out afterward:
 
 ```bash
-cd /path/to/output-dir       # grok writes generated files here
-grok --prompt-file /tmp/img-brief.md -m grok-4.5 --disable-web-search
+# ISOLATED + fail-closed — never let grok's working dir be inside a real repo.
+GROK_ISO="$(mktemp -d "${TMPDIR:-/tmp}/grok-iso.XXXXXX")"
+if [ -z "$GROK_ISO" ] || git -C "$GROK_ISO" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  echo "grok-relay: cannot isolate; refusing Grok" >&2
+else
+  ( cd "$GROK_ISO" && grok --prompt-file /tmp/img-brief.md -m grok-4.5 --disable-web-search )
+  # find, not a brace glob: brace expansion is not POSIX and would silently drop the artifact
+  # under dash, which the rm -rf below would then delete.
+  find "$GROK_ISO" -type f \( -name '*.png' -o -name '*.jpg' -o -name '*.jpeg' -o -name '*.webp' -o -name '*.mp4' \) -exec mv {} /path/to/output-dir/ \;
+fi
+[ -n "$GROK_ISO" ] && rm -rf "$GROK_ISO"
 ```
 
 where the brief instructs: "Use your `image_gen` tool to generate <description>. Save the file
 in the current working directory. Print the saved absolute path on its own line prefixed with
 `SAVED:`. If you have no image tool, print `IMAGE TOOL: NONE`." Grok prints `SAVED: <path>`;
-read that path. `--disable-web-search` does NOT disable the media tools (they are separate from
-web search) — keep it on for determinism. To ground the output in your own brand, pass
-reference images via the prompt/attachments and use `reference_to_video` or an edit flow.
-Live-verified: a `grok --prompt-file` run generated `blue-circle.jpg` into the target dir.
+read it, then move the file out of the temp dir. `--disable-web-search` does NOT disable the
+media tools AND does NOT stop the repo upload — isolation is the safeguard, not that flag.
+For image-only work, prefer Codex or agy (below): both keep the repo local, so they can write
+straight into your output dir. Live-verified: a `grok --prompt-file` run generated
+`blue-circle.jpg` (from an isolated dir the artifact is moved into place).
 
 ### GPT (Codex) — image_gen works headless (with an effort caveat)
 
@@ -572,6 +673,8 @@ structured output for the precise reason. When capturing a piped tool's exit thr
 | Codex stops with a clarifying question instead of reviewing | Default read-only sandbox blocked a command it needed | Escalate sandbox only as far as needed; or pre-fetch data into the prompt file |
 | Codex answer seems shallow on a 5.6 model | GPT-5.6 models default to LOW reasoning effort | Pass `-c model_reasoning_effort="high"` / `"ultra"` explicitly (or pin it in config.toml) |
 | Prompt with backticks / `$` / newlines mangled or executed | Shell interpreted the inline `"…"` | Write to a file; feed via stdin, `--prompt-file`, or a quoted `"$(cat file)"` |
+| Grok ran inside a real repo without isolation | Grok bundles + uploads the whole tracked repo + git history to xAI GCS (see the data-egress block above) | Isolate every Grok call in a non-git temp dir; if it already happened, follow [../SECURITY.md](../SECURITY.md) to check logs and rotate exposed secrets |
+| "Is Grok read-only / local / safe?" | No — it is the one lane that uploads your whole repo | Never present Grok as read-only/local; text-in/answer-out from an isolated dir only; route repo-context work to Codex/Gemini/GLM/Claude |
 | Grok stderr noise: `AuthorizationRequired`, `Skipping MCP tool` (stdout still arrives) | Cosmetic startup noise + digit-prefixed MCP tool names | Pipe `2>/dev/null` |
 | Grok `-p` hangs 2+ min, no stdout (stderr may show `worker quit with fatal … Auth(AuthorizationRequired)`, or nothing) | Provider-side 502 from `cli-chat-proxy.grok.com` (CLI swallows it), or a stale cached token | Run the `RUST_LOG=debug` diagnosis in the Grok section: 502s in the log = provider outage, skip Grok and retry later; no 502s + fatal auth line = `grok login` + one retry. Wrap unattended calls in a timeout |
 | Grok surfaces unrelated tweets/blogs as "evidence" | Web search left on | Add `--disable-web-search` |
