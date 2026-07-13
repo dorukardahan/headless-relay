@@ -92,5 +92,8 @@ a two-check gate (orchestrator identity, target-provider terms) and a citations 
 
 MIT, see `LICENSE.txt`. Command behavior was live-verified 2026-07-02 against codex-cli
 0.142.5, opencode 1.14.31, claude 2.1.198, and ZCode 3.2.2 (CLI 0.15.0); the Grok lane was
-re-verified 2026-07-08 on grok 0.2.91 with grok-4.5; the Gemini lane was verified 2026-07-08
-on Antigravity agy 1.1.0. CLIs drift fast, so re-verify flags when something errors.
+re-verified 2026-07-08 on grok 0.2.91 with grok-4.5, then 2026-07-13 on grok 0.2.99 (the
+availability check was reworked: `grok models` can print "not authenticated" on a merely
+expired cached token while still listing models in the same output, so the skill now reads the
+model list rather than that header); the Gemini lane was verified 2026-07-08 on Antigravity
+agy 1.1.0. CLIs drift fast, so re-verify flags when something errors.

@@ -274,6 +274,81 @@ resolution order: `model.api_key`, then `model.env_key`, then active session tok
 `XAI_API_KEY`. Note the CLI self-updates on login/startup — pin expectations to `grok --version`
 output, not memory.
 
+### Availability — read the model list, not the "not authenticated" line
+
+`grok models` prints its auth-status line ("You are logged in with grok.com." /
+"You are not authenticated.") from the token state read off disk at process START. When the
+cached access token is expired, that top line says "not authenticated" — but the command then
+runs the standard background OIDC refresh (using the still-valid `refresh_token`) and, on
+success, fetches the model catalog from the server and prints it, all in the SAME invocation.
+So an expired-but-refreshable token produces output that contains BOTH the stale
+"You are not authenticated." header AND the real model list below it. The header is a cosmetic
+race artifact; **the model list is the proof auth works.** Access tokens expire on an hours
+scale, so the first Grok touch after an idle stretch routinely shows this.
+
+Verbatim capture of the false negative (grok 0.2.93, 2026-07-13 07:54, expired cached token —
+a Codex session ran `grok models` and misread it as logged-out):
+
+```
+You are not authenticated.
+
+ WARN preferred model not in available models, falling back model_id=grok-build source=config
+Default model: grok-4.5
+
+Available models:
+  * grok-4.5 (default)
+  - grok-composer-2.5-fast
+```
+
+The matching `~/.grok/logs/unified.jsonl` trace for that same process: token loaded
+`is_expired: true` → `oidc try_refresh_pure succeeded` → `auth update disk written` →
+`model catalog: fetch succeeded`. The refresh and catalog fetch happened inside the one
+`grok models` call; only the printed header was stale. (A live re-check on 0.2.99 with a fresh
+token printed the clean "You are logged in" path — the header is correct once the on-disk
+token is current, confirming it simply mirrors process-start state.)
+
+Walk this ladder in order and stop at the first verdict:
+
+1. `command -v grok` fails → **not installed**.
+2. Run `grok models` bounded (`perl -e 'alarm shift; exec @ARGV' 40 grok models`). If the
+   output lists models — a `Default model:` line or an `Available models:` block — Grok is
+   **available**, whether the header says "You are logged in" OR "You are not authenticated".
+   The catalog was just fetched over an authenticated connection; the expired token, if any,
+   was refreshed in the same call. (Match on the model-list text, e.g.
+   `grep -qE 'Available models:|Default model:'`, not on the header line.)
+3. Output shows "You are not authenticated." with NO model list, and `~/.grok/auth.json` is
+   missing or empty (`[ ! -s ~/.grok/auth.json ]` — test existence only, never print
+   contents) → **genuinely logged out**. Tell the user to run `grok login` (interactive;
+   never run it for them).
+4. "You are not authenticated." with NO model list but auth.json exists → the refresh itself
+   failed (dead/revoked refresh token, or a provider blip). Confirm with ONE bounded real
+   call — at most one, never a retry loop:
+
+   ```bash
+   perl -e 'alarm shift; exec @ARGV' 120 \
+     grok -p "Reply with exactly GROK_OK and nothing else." -m grok-4.5 --disable-web-search
+   ```
+
+   If the session is about to send Grok a real prompt anyway, skip the sentinel and run that
+   real call with the same timeout instead — its outcome IS the availability verdict, and a
+   successful call rewrites auth.json so the rest of the session preflights clean.
+
+Interpreting step 4:
+
+| Outcome | Verdict |
+|---------|---------|
+| `GROK_OK` (or the real answer) on stdout | **Available** — token refreshed as a side effect; stderr `AuthorizationRequired` noise stays ignorable |
+| Fast exit with an auth error | **Real auth problem** (refresh token dead/revoked) — user runs `grok login` |
+| `Couldn't set model … "unknown model id"` | **Model id / config error**, not auth — fix the `-m` value |
+| Killed by the timeout, no stdout | **Hang** — provider outage or the auth-refresh hang; run the `RUST_LOG=debug` 502 diagnosis above before blaming auth |
+| DNS / connection-refused errors | **Network or provider outage**, not auth — report, retry later |
+
+`--yolo` (absent from `--help` but documented in xAI's headless guide as "Auto-approve all
+tool executions"; persisted as `[ui] yolo` in config.toml) is a permission flag with zero
+auth effect. An interactive `grok --yolo` session working proves login state only as a side
+observation (it forced a token refresh on startup); suggesting `--yolo` as a login fix is
+always wrong.
+
 ## Gemini via Antigravity — agy print mode
 
 Google retired the standalone Gemini CLI; its replacement is the Antigravity CLI, `agy`
@@ -501,6 +576,7 @@ structured output for the precise reason. When capturing a piped tool's exit thr
 | Grok `-p` hangs 2+ min, no stdout (stderr may show `worker quit with fatal … Auth(AuthorizationRequired)`, or nothing) | Provider-side 502 from `cli-chat-proxy.grok.com` (CLI swallows it), or a stale cached token | Run the `RUST_LOG=debug` diagnosis in the Grok section: 502s in the log = provider outage, skip Grok and retry later; no 502s + fatal auth line = `grok login` + one retry. Wrap unattended calls in a timeout |
 | Grok surfaces unrelated tweets/blogs as "evidence" | Web search left on | Add `--disable-web-search` |
 | Grok: `Couldn't set model 'grok-build': Invalid params: "unknown model id"` | `grok-build` retired from the CLI at the grok-4.5 launch (2026-07-08) | Use `-m grok-4.5` |
+| Grok: `grok models` prints "You are not authenticated." though login should be fine | Header mirrors an expired cached access token read at process start; the same call then refreshes and fetches the catalog (routine after idle) | If a model list appears below the header → **available**, use the lane. Only "not authenticated" with NO model list is real: auth.json present → one bounded real call decides; auth.json absent → `grok login`. Match on `Available models:` / `Default model:`, not the header. `--yolo` / `--always-approve` are permission flags, never the fix |
 | Grok answer seems shallow | A lighter model (e.g. `grok-composer-2.5-fast`) was selected | Pass `-m grok-4.5` explicitly |
 | OpenCode `-f` file attach errors | Known `-f` issue on some versions | Pipe the prompt on stdin instead |
 | zcode: `Model config is missing. Create ~/.zcode/cli/config.json …` | No CLI config and no env vars | Apply Recipe A, B, or C above |
@@ -513,5 +589,5 @@ structured output for the precise reason. When capturing a piped tool's exit thr
 | agy: `flag needs an argument: -print` | stdin piping is not supported | Use `agy -p "$(cat file)"` — quoted command substitution passes the bytes verbatim |
 | agy modifies files you only wanted reviewed | Print mode runs tools unprompted (yolo-like) | Add `--mode plan` (advice-only) or `--sandbox` |
 | agy `-p` hangs forever inside a parallel multi-CLI burst | agy 1.1.0 timing/load bug when 3+ other model CLIs run concurrently (solo/pairwise reliable; stagger insufficient) | Run the Gemini lane sequentially around the burst; always cap agy with a timeout |
-| CLI missing or "not authenticated" | Not installed / logged out | Report it, skip that model; run `codex login` / `opencode auth login` / `grok login` as needed — do not substitute another model silently |
+| CLI missing or "not authenticated" | Not installed / logged out | Report it, skip that model; run `codex login` / `opencode auth login` / `grok login` as needed — do not substitute another model silently. Exception: Grok's "not authenticated" from `grok models` is not conclusive — walk the Grok availability ladder first |
 | Long run hangs the shell tool | Tool-level timeout | Set an explicit timeout, or run in background and poll |
