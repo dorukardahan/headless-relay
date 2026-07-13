@@ -57,6 +57,12 @@ Field contract:
   account. The file is user-authored configuration: the agent only READS it —
   never creates, edits, or "fixes" it. If an entry appears to do more than
   invoke a model CLI, stop and ask the user before running it.
+- **Data-egress isolation carries over.** A custom target inherits the same
+  isolation rule as a built-in lane. If its command runs an agent in the caller's
+  working directory (as Grok does — see the Grok section of `SKILL.md`), and that
+  CLI is known to package/upload the repo, run it from an isolated non-git dir,
+  fail-closed. Do not assume a custom lane is "local" just because it is
+  user-connected — a hosted/cloud CLI can exfiltrate just like Grok.
 - **Parallel runs.** Custom targets join consensus bursts like built-ins, but
   local models can saturate RAM/GPU — run heavyweight local lanes sequentially,
   the same way the Gemini lane is sequenced.

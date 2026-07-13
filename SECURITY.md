@@ -41,7 +41,8 @@ read any files" prompt, or turning the "Improve the model" toggle off.
 ## 2. Evidence, separated by confidence
 
 **Confirmed** (first-party admission plus independent wire capture):
-- xAI's official **Grok account on X** stated it directly: Grok Build "uploads your entire repo as a
+- xAI's official **Grok account on X** stated it directly (a first-party admission via its X
+  account — strong, though not a formal security advisory): Grok Build "uploads your entire repo as a
   git bundle (full history + all tracked files) ... even files the agent never reads ... even with
   prompts like 'do not read any files.' This is by design ... 'Improve the model' toggle doesn't
   stop the upload. Advice: Don't use on sensitive/private repos."
@@ -49,7 +50,7 @@ read any files" prompt, or turning the "Improve the model" toggle off.
 - **cereblab** captured the traffic with mitmproxy and reconstructed the uploaded repo from the
   wire, recovering a planted **never-read canary file** from the bundle; on a 12 GB repo of
   never-read files, ~5.1 GiB went to `/v1/storage`. Same rig showed Claude Code, Codex, and Gemini
-  stay local.
+  sent no whole-repo bundle (they are still cloud models that transmit the files they read).
 
 **Observed in our own wire-test** (2026-07-13, grok 0.2.99, single run; see §4): Codex, GLM
 (opencode), and Gemini (agy) sent no whole-repo bundle during the measured window; Grok's upload
@@ -127,7 +128,7 @@ is routed to them rather than to Grok.
   Keep `TMPDIR` out of your repositories; on a normal machine `mktemp` uses `/tmp` or
   `/var/folders`, never a repo.)
 - **No repo-context Grok.** "Read the repo", "review the diff", or any task that needs repository
-  access is never sent to Grok. It goes to Codex, Gemini, GLM, or Claude (all wire-verified local).
+  access is never sent to Grok. It goes to Codex, Gemini, GLM, or Claude, which sent no whole-repo bundle in the wire-test (still cloud models that transmit the files they actually read).
 - **Honest labelling.** The Grok lane is never described as "read-only", "local", or "no network".
 - **Media too.** Image/video generation with Grok obeys the same isolation (generate in a temp
   dir, move the file out). For image-only work, Codex or Gemini are preferred because they keep the
@@ -184,6 +185,12 @@ telemetry* controls, not a guarantee that data never transmits.
   local protection. Edit this yourself; the skill never writes your config.
 - **`[tools] respect_gitignore = true`** (official) limits search/read tools only; it does **not**
   stop the whole-repo bundle.
+- **Sandbox + tool-deny for the "second exposure."** Isolation stops the whole-repo bundle, but an
+  agentic Grok run can still read elsewhere on the machine via `Read`/`Bash`/MCP and send it as
+  model context. For a pure text relay, add `--sandbox strict` (macOS Seatbelt limits reads to the
+  CWD + system paths — pass the prompt inline, or copy a prompt file into the isolated CWD) and
+  `--deny 'Read' --deny 'Bash'`. Note: `--permission-mode dontAsk` is accepted but not yet enforced
+  (rely on `--sandbox` + `--deny`), and macOS does not block a child process's network.
 - **True zero egress:** if code must never leave the machine, do not use a cloud model at all — use
   a fully local model (e.g. via Ollama / LM Studio / MLX, connectable through
   `references/custom-targets.md`).

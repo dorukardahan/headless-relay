@@ -11,8 +11,17 @@
 #      guards (`rev-parse --is-inside-work-tree`) than Grok calls: i.e. a call is unisolated, or a
 #      naked call was added next to a guarded one (masking).
 # Comment-only lines are excluded, so prose mentions of `grok -p` inside a block do not count.
-# Limitation: only ```-fenced blocks are scanned (the docs use no other fence style); non-fenced
-# shell in prose is out of scope by design.
+#
+# WHAT THIS IS — and IS NOT. This is a text-signature TRIPWIRE, not a security proof. It catches
+# the most likely regression (a fenced Grok call that lost its fail-closed guard). It does NOT:
+#   - prove the guard actually isolates at runtime (that is the unverified negative documented in
+#     SECURITY.md — a git bundle can only come from a git repo, but it was never wire-measured);
+#   - scan inline/prose command mentions (e.g. a `grok --prompt-json` table cell) — only ```-fenced
+#     blocks are scanned (the docs use no other fence style);
+#   - distinguish a real guard from an unrelated `rev-parse` string that happens to share a block
+#     (a single naked Grok call co-located with an unrelated rev-parse would slip the per-block
+#     count). None of these forms exist in the repo today; the tripwire's job is to keep it that way.
+# Treat a green result as "no obvious regression", not "proven safe".
 #
 # No dependencies beyond POSIX sh + awk + grep. Run from anywhere.
 

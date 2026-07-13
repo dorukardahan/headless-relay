@@ -2,7 +2,7 @@
 name: headless-relay
 description: Headless handoff guide for running other AI models from inside an agent session (any Agent Skills runtime - Claude Code, Codex, Grok Build, Cursor, OpenClaw, Hermes). Covers GPT (codex exec), GLM (opencode run or zcode --prompt), Grok (grok -p), Gemini (Antigravity agy -p), and Claude (claude -p or a subagent) - inline vs file prompts, parallel multi-model consensus, JSON output, session resume, image/video generation, provider-terms compliance. Use for "ask codex", "ask GLM", "ask grok", "ask gemini", "second opinion", "cross-model review", "generate an image", "run headless", "ask another model".
 license: MIT. Complete terms in LICENSE.txt
-metadata: {"version": "2.0.0"}
+metadata: {"version": "2.0.1"}
 ---
 
 # headless-relay
@@ -62,7 +62,7 @@ showed Codex, GLM (opencode), and Gemini (agy) send **no** whole-repo bundle.
 # Run Grok with NO repo in its working directory. Fail-closed: refuse if isolation can't hold.
 # This exact block is the shape every Grok call below reuses (swap the grok line).
 GROK_ISO="$(mktemp -d "${TMPDIR:-/tmp}/grok-iso.XXXXXX")"
-if [ -z "$GROK_ISO" ] || git -C "$GROK_ISO" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+if [ -z "$GROK_ISO" ] || ! command -v git >/dev/null 2>&1 || git -C "$GROK_ISO" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   echo "grok-relay: cannot isolate (mktemp failed, or temp dir is inside a git repo); refusing Grok" >&2
 else
   ( cd "$GROK_ISO" && grok -p "your question here" -m grok-4.5 --disable-web-search 2>/dev/null )
@@ -70,13 +70,31 @@ fi
 [ -n "$GROK_ISO" ] && rm -rf "$GROK_ISO"
 ```
 
-The two guards matter: `[ -z "$GROK_ISO" ]` refuses if `mktemp` failed (an unset dir would make
-`cd` a no-op and leave Grok running in the caller's repo), and `git … rev-parse` refuses if the
-temp dir landed inside a git repo (e.g. a `TMPDIR` pointing into one). `--disable-web-search` is
-only for output determinism; it does **nothing** for data egress. The isolation (empty non-git
-working directory) is the safeguard. Optional per-user hardening (community-reported
-`~/.grok/config.toml` kill-switches, the in-CLI `/privacy` command) is in [SECURITY.md](SECURITY.md);
-treat it as defense-in-depth, never a substitute for isolation.
+The three guards matter: `[ -z "$GROK_ISO" ]` refuses if `mktemp` failed (an unset dir makes `cd`
+a no-op and leaves Grok in the caller's repo); `! command -v git` refuses if the `git` binary is
+absent (the check cannot verify, so fail closed); and `git … rev-parse` refuses if the temp dir
+landed inside a git repo (e.g. a `TMPDIR` pointing into one). `--disable-web-search` is only for
+output determinism; it does **nothing** for data egress. The isolation (empty non-git working
+directory) is the safeguard against the whole-repo bundle.
+
+**Second exposure — Grok's own tools.** Isolation stops the repo *bundle*, but an agentic Grok run
+can still read elsewhere on the machine through its `Read` / `Bash` / MCP tools or absolute paths
+and send what it reads to xAI as ordinary model context. For a pure text relay, harden the call:
+add `--sandbox strict` (macOS Seatbelt limits filesystem reads to the CWD + system paths — so pass
+the prompt inline with `-p`, or copy the prompt file INTO the isolated CWD, since a file outside
+CWD is then unreadable) and deny the tools you do not need (`--deny 'Read' --deny 'Bash'`, or a
+PreToolUse allow-list). Caveats, from xAI's own docs: `--permission-mode dontAsk` is accepted but
+**not yet enforced** (rely on `--sandbox` + `--deny`, not the mode), and macOS does not block a
+child process's network.
+
+**Runtime kill-switch surface (secondary signal, never a guarantee).** As a preflight courtesy you
+MAY read the user's `~/.grok/config.toml` for the community kill-switches
+(`[harness] disable_codebase_upload`, `[telemetry] trace_upload`, `[features] telemetry`) and report
+their state — e.g. "your config does not disable the codebase upload; relying on isolation." Read
+only; never write the user's config, and never treat a present flag as proof (xAI controls whether
+the binary honours it — see the `trace_upload_source` note in the availability ladder). Full
+per-user hardening (those flags, the in-CLI `/privacy` retention command) is in
+[SECURITY.md](SECURITY.md); all of it is defense-in-depth, never a substitute for isolation.
 
 ## Preflight: is the model available?
 
@@ -89,7 +107,7 @@ substitute a different model to fill the gap.
 | GPT (Codex) | `command -v codex` | fails fast with an auth error when logged out (`codex login`) |
 | GLM via OpenCode | `command -v opencode` | `opencode auth list` shows a Z.AI credential |
 | GLM via ZCode | `command -v zcode` (add a PATH wrapper if only the app is installed) | `~/.zcode/cli/config.json` exists or `ZCODE_API_KEY` is set. `zcode login` is currently broken — see [references/cli-reference.md](references/cli-reference.md) |
-| Grok | `command -v grok` | **First apply the Grok isolation rule above — never run any `grok` command in the caller's repo.** Availability: run `grok models` **from an isolated non-git dir too**, with the same fail-closed guard (`GI="$(mktemp -d "${TMPDIR:-/tmp}/grok-iso.XXXXXX")"; if [ -z "$GI" ] || git -C "$GI" rev-parse --is-inside-work-tree >/dev/null 2>&1; then echo "grok-relay: cannot isolate; refusing" >&2; else ( cd "$GI" && grok models ); fi; [ -n "$GI" ] && rm -rf "$GI"`), bounded — it is a catalog fetch, but isolate it the same way so the rule has no exception. Grok is available if the output lists models (`Default model:` / `Available models:`), EVEN IF a "You are not authenticated." line appears above the list — that header just mirrors an expired cached token that the same call silently refreshes before fetching the catalog. Only "not authenticated" with NO model list is a real problem: auth.json missing → logged out; auth.json present → confirm with one bounded real call (isolated — it is a real `grok -p`). Walk the availability ladder in [references/cli-reference.md](references/cli-reference.md) |
+| Grok | `command -v grok` | **First apply the Grok isolation rule above — never run any `grok` command in the caller's repo.** Availability: run `grok models` **from an isolated non-git dir too**, with the same fail-closed guard (`GI="$(mktemp -d "${TMPDIR:-/tmp}/grok-iso.XXXXXX")"; if [ -z "$GI" ] || ! command -v git >/dev/null 2>&1 || git -C "$GI" rev-parse --is-inside-work-tree >/dev/null 2>&1; then echo "grok-relay: cannot isolate; refusing" >&2; else ( cd "$GI" && grok models ); fi; [ -n "$GI" ] && rm -rf "$GI"`), bounded — it is a catalog fetch, but isolate it the same way so the rule has no exception. Grok is available if the output lists models (`Default model:` / `Available models:`), EVEN IF a "You are not authenticated." line appears above the list — that header just mirrors an expired cached token that the same call silently refreshes before fetching the catalog. Only "not authenticated" with NO model list is a real problem: auth.json missing → logged out; auth.json present → confirm with one bounded real call (isolated — it is a real `grok -p`). Walk the availability ladder in [references/cli-reference.md](references/cli-reference.md) |
 | Gemini via Antigravity | `command -v agy` | `agy models` lists the model menu when logged in; the default model comes from the user's Antigravity config |
 | Claude | in-session already (native subagent); `command -v claude` only for headless | current session auth |
 
@@ -113,7 +131,10 @@ Studio, Apple MLX) or other providers — by declaring them in
 session needs the target list: each entry carries its own binary/auth preflight
 and an invoke template, and joins every flow in this skill (offers, consensus
 bursts) as a first-class lane. The preflight and compliance rules above apply to
-custom targets unchanged. The registry is user-authored configuration: only read
+custom targets unchanged. **If a custom target wraps Grok (or any CLI with the same
+whole-repo-upload behaviour) — i.e. it runs an agent in the caller's working
+directory — the Grok isolation rule applies to it too: run it from an isolated
+non-git dir, fail-closed.** The registry is user-authored configuration: only read
 it — never create, edit, or repair it on the user's behalf.
 
 ## Compliance gate: check the orchestrator and the target
@@ -179,7 +200,7 @@ zcode --prompt "your question here"
 # Grok — MUST run isolated (uploads your whole repo otherwise; see the Grok section above).
 #        --disable-web-search is output-determinism only, NOT a privacy control.
 GROK_ISO="$(mktemp -d "${TMPDIR:-/tmp}/grok-iso.XXXXXX")"
-if [ -z "$GROK_ISO" ] || git -C "$GROK_ISO" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+if [ -z "$GROK_ISO" ] || ! command -v git >/dev/null 2>&1 || git -C "$GROK_ISO" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   echo "grok-relay: cannot isolate; refusing Grok" >&2
 else
   ( cd "$GROK_ISO" && grok -p "your question here" -m grok-4.5 --disable-web-search 2>/dev/null )
@@ -199,7 +220,7 @@ claude -p "your question here" --model fable
 |--------------|------|---------|
 | Short, one line, no special chars | Inline argument or `echo … \|` | `codex exec "is this regex safe?"` |
 | Long, multi-line, or contains backticks / `$` / quotes / a diff | File + stdin | write `/tmp/handoff.md`, then `< /tmp/handoff.md` |
-| Programmatic content blocks | JSON flag | `grok --prompt-json '…'` |
+| Programmatic content blocks | JSON flag | `grok --prompt-json '…'` (Grok, like any Grok call, must run isolated — see the Grok section; never run it in the caller's repo) |
 
 **Why a file for anything non-trivial:** passing a long prompt inside `"…"` lets the shell
 interpret backticks (`` ` ``) as command substitution, `$` as variables, and newlines/quotes
@@ -226,7 +247,7 @@ zcode --prompt "$(cat /tmp/handoff.md)"
 # Grok: takes a file flag directly (not stdin) — but MUST run isolated (see the Grok section).
 # The prompt file is an absolute path, so it is still readable from the isolated working dir.
 GROK_ISO="$(mktemp -d "${TMPDIR:-/tmp}/grok-iso.XXXXXX")"
-if [ -z "$GROK_ISO" ] || git -C "$GROK_ISO" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+if [ -z "$GROK_ISO" ] || ! command -v git >/dev/null 2>&1 || git -C "$GROK_ISO" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   echo "grok-relay: cannot isolate; refusing Grok" >&2
 else
   ( cd "$GROK_ISO" && grok --prompt-file /tmp/handoff.md -m grok-4.5 --disable-web-search 2>/dev/null )
@@ -262,7 +283,7 @@ cat /tmp/handoff.md | opencode run -m "zai-coding-plan/glm-5.2" --variant max > 
 # Grok lane runs ISOLATED + fail-closed in its own throwaway dir — never the repo cwd:
 (
   GI="$(mktemp -d "${TMPDIR:-/tmp}/grok-iso.XXXXXX")"
-  if [ -z "$GI" ] || git -C "$GI" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  if [ -z "$GI" ] || ! command -v git >/dev/null 2>&1 || git -C "$GI" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     echo "grok-relay: cannot isolate; refusing Grok" >&2
   else
     ( cd "$GI" && grok --prompt-file /tmp/handoff.md -m grok-4.5 --disable-web-search )
@@ -389,7 +410,7 @@ non-git temp dir (NOT the output dir if that dir is inside a repo), then move th
 # Grok media — ISOLATED + fail-closed. Grok in a repo uploads the whole repo (see the Grok section).
 # --disable-web-search does NOT disable the media tools and does NOT stop egress; isolation does.
 GROK_ISO="$(mktemp -d "${TMPDIR:-/tmp}/grok-iso.XXXXXX")"
-if [ -z "$GROK_ISO" ] || git -C "$GROK_ISO" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+if [ -z "$GROK_ISO" ] || ! command -v git >/dev/null 2>&1 || git -C "$GROK_ISO" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   echo "grok-relay: cannot isolate; refusing Grok" >&2
 else
   ( cd "$GROK_ISO" && grok --prompt-file /tmp/img-brief.md -m grok-4.5 --disable-web-search )

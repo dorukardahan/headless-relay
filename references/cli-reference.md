@@ -270,7 +270,7 @@ closed if that cannot be guaranteed:
 
 ```bash
 GROK_ISO="$(mktemp -d "${TMPDIR:-/tmp}/grok-iso.XXXXXX")"
-if [ -z "$GROK_ISO" ] || git -C "$GROK_ISO" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+if [ -z "$GROK_ISO" ] || ! command -v git >/dev/null 2>&1 || git -C "$GROK_ISO" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   # mktemp failed (empty var → cd no-op → Grok would run in the caller's repo), or the temp
   # dir landed inside a git repo (e.g. TMPDIR points into one). Either way, do not run Grok.
   echo "grok-relay: cannot isolate; refusing to run Grok" >&2
@@ -293,6 +293,13 @@ change per version — verify per version, treat as unverified:
   `source=remote` is not local protection. The skill only READS user config; it never writes it.
 - The official `[tools] respect_gitignore=true` limits search/read tools only; it does **not** stop
   the whole-repo bundle.
+- **Second exposure — Grok's own tools.** Isolation stops the repo *bundle*, but an agentic Grok
+  run can still read elsewhere via `Read`/`Bash`/MCP/absolute paths and send it as model context.
+  For a pure text relay, add `--sandbox strict` (macOS Seatbelt limits reads to CWD + system paths;
+  pass the prompt inline with `-p`, or copy a prompt file INTO the isolated CWD) and `--deny 'Read'
+  --deny 'Bash'`. Caveats: `--permission-mode dontAsk` is accepted but NOT yet enforced (rely on
+  `--sandbox` + `--deny`); macOS does not block a child process's network. See the "Second exposure"
+  and runtime kill-switch notes in `SKILL.md`.
 
 Headless via `-p`. Use `-m grok-4.5` — xAI's coding/agents frontier model (launched
 2026-07-08, trained with Cursor; 500K context; reasoning-effort supported, default `high`).
@@ -330,7 +337,7 @@ stderr error at all even after a fresh login). Diagnose definitively before blam
 ```bash
 # Run this diagnostic ISOLATED + fail-closed (it is a real grok -p — see the isolation block).
 GROK_ISO="$(mktemp -d "${TMPDIR:-/tmp}/grok-iso.XXXXXX")"
-if [ -z "$GROK_ISO" ] || git -C "$GROK_ISO" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+if [ -z "$GROK_ISO" ] || ! command -v git >/dev/null 2>&1 || git -C "$GROK_ISO" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   echo "grok-relay: cannot isolate; refusing Grok" >&2
 else
   ( cd "$GROK_ISO" && RUST_LOG=debug grok -p "test" -m grok-4.5 --disable-web-search 2>/tmp/grok-debug.log ) &
@@ -390,7 +397,7 @@ Walk this ladder in order and stop at the first verdict:
 
 1. `command -v grok` fails → **not installed**.
 2. Run `grok models` **isolated + fail-closed** and bounded
-   (`GI="$(mktemp -d "${TMPDIR:-/tmp}/grok-iso.XXXXXX")"; if [ -z "$GI" ] || git -C "$GI" rev-parse --is-inside-work-tree >/dev/null 2>&1; then echo "grok-relay: cannot isolate; refusing" >&2; else ( cd "$GI" && perl -e 'alarm shift; exec @ARGV' 40 grok models ); fi; [ -n "$GI" ] && rm -rf "$GI"`).
+   (`GI="$(mktemp -d "${TMPDIR:-/tmp}/grok-iso.XXXXXX")"; if [ -z "$GI" ] || ! command -v git >/dev/null 2>&1 || git -C "$GI" rev-parse --is-inside-work-tree >/dev/null 2>&1; then echo "grok-relay: cannot isolate; refusing" >&2; else ( cd "$GI" && perl -e 'alarm shift; exec @ARGV' 40 grok models ); fi; [ -n "$GI" ] && rm -rf "$GI"`).
    It is only a catalog fetch, but isolate it with the same guard so rule #1 (never run `grok` in
    the repo) has no exception. If the
    output lists models — a `Default model:` line or an `Available models:` block — Grok is
@@ -409,7 +416,7 @@ Walk this ladder in order and stop at the first verdict:
    ```bash
    # Run the sentinel ISOLATED + fail-closed — it is a real grok -p and would otherwise bundle the repo.
    GROK_ISO="$(mktemp -d "${TMPDIR:-/tmp}/grok-iso.XXXXXX")"
-   if [ -z "$GROK_ISO" ] || git -C "$GROK_ISO" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+   if [ -z "$GROK_ISO" ] || ! command -v git >/dev/null 2>&1 || git -C "$GROK_ISO" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
      echo "grok-relay: cannot isolate; refusing Grok" >&2
    else
      ( cd "$GROK_ISO" && perl -e 'alarm shift; exec @ARGV' 120 \
@@ -507,7 +514,7 @@ So generate in an isolated non-git temp dir and move the artifact out afterward:
 ```bash
 # ISOLATED + fail-closed — never let grok's working dir be inside a real repo.
 GROK_ISO="$(mktemp -d "${TMPDIR:-/tmp}/grok-iso.XXXXXX")"
-if [ -z "$GROK_ISO" ] || git -C "$GROK_ISO" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+if [ -z "$GROK_ISO" ] || ! command -v git >/dev/null 2>&1 || git -C "$GROK_ISO" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   echo "grok-relay: cannot isolate; refusing Grok" >&2
 else
   ( cd "$GROK_ISO" && grok --prompt-file /tmp/img-brief.md -m grok-4.5 --disable-web-search )
