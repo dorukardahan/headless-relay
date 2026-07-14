@@ -5,7 +5,9 @@
 including a tracked `.env`) to xAI-controlled cloud storage, regardless of which files the model
 actually reads. This is confirmed by xAI's own account and by independent wire capture. From
 **v2.0.0**, headless-relay runs every Grok call **fail-closed**: isolated in an empty, non-git
-temporary directory, never in your repository, and it refuses rather than risk a leak. Repo- and
+temporary directory, never in your repository, and it refuses rather than risk a leak. From
+**v2.0.2**, every text relay additionally denies all of Grok's own tools (`--deny '*'`) and adds a
+best-effort sandbox (`--sandbox strict`), closing the "second exposure" (§5). Repo- and
 diff-context work is routed to Codex, Gemini, GLM, or Claude, which a wire-test showed send no
 whole-repo bundle (they are still cloud models that transmit the files they actually read). The
 other four lanes are unaffected.
@@ -109,6 +111,13 @@ or versions may already have it on. It also means the isolation safeguard could 
 demonstrated (with the feature server-off, in-repo and isolated both show no bundle, and there is
 no local switch to force it on for a contrast test).
 
+**Update (2026-07-14):** a follow-up check on the same 0.2.99 client, after setting
+`[telemetry] trace_upload = false` and `[features] telemetry = false` in `~/.grok/config.toml`,
+logged `trace_upload_source=config` (was `remote`) with uploads off — so for the **trace/telemetry
+channel** those config keys are honored locally on 0.2.99. The **bundle** switch
+(`disable_codebase_upload`) still cannot be independently verified: with uploads globally off, the
+codebase-upload path never fires, so there is no observable effect to measure. See §7.
+
 During the measured window the alternative lanes (Codex, GLM, Gemini) sent no whole-repo bundle.
 Each figure is a single whole-machine egress run (n=1, no per-process backstop), so this excludes
 a *synchronous* whole-repo bundle at the ~100x margin but not a deferred/async upload after the
@@ -118,21 +127,29 @@ is routed to them rather than to Grok.
 
 ---
 
-## 5. What headless-relay does about it (v2.0.0)
+## 5. What headless-relay does about it (v2.0.0+)
 
 - **Fail-closed isolation.** Every Grok call runs in a fresh, empty, non-git temporary directory,
   with context passed only through the prompt / prompt file. No repository in the working
-  directory means no git repository to bundle. If isolation cannot be guaranteed, the skill
-  refuses to run Grok and says why. (One narrow residual: the guard uses `git rev-parse` to
-  verify the temp dir is not inside a repo, so if the `git` binary is absent it cannot fire.
-  Keep `TMPDIR` out of your repositories; on a normal machine `mktemp` uses `/tmp` or
-  `/var/folders`, never a repo.)
+  directory means no git repository to bundle. If isolation cannot be guaranteed — `mktemp`
+  failed, the temp dir landed inside a git repo, or (since v2.0.1) the `git` binary is absent so
+  the check cannot verify — the skill refuses to run Grok and says why. Keep `TMPDIR` out of your
+  repositories; on a normal machine `mktemp` uses `/tmp` or `/var/folders`, never a repo.
+- **Tools denied, sandbox added (v2.0.2) — the "second exposure".** Isolation stops the repo
+  bundle, but an agentic Grok run could still read elsewhere on the machine via its
+  `Read`/`Bash`/MCP tools and send that as ordinary model context. A pure text relay needs no
+  tools, so the canonical call denies all of them (`--deny '*'` — verified on 0.2.99: tools are
+  refused by policy, the text answer still arrives) and adds `--sandbox strict` as a second layer.
+  The sandbox **fails open** (per xAI's docs, an inapplicable built-in profile logs a warning and
+  continues unenforced; only an explicit custom profile refuses to start), so the deny rules and
+  the isolation are the load-bearing parts. Media calls run sandbox-only, because any `--deny`
+  rule also blocks the image/video tools (verified on 0.2.99).
 - **No repo-context Grok.** "Read the repo", "review the diff", or any task that needs repository
   access is never sent to Grok. It goes to Codex, Gemini, GLM, or Claude, which sent no whole-repo bundle in the wire-test (still cloud models that transmit the files they actually read).
 - **Honest labelling.** The Grok lane is never described as "read-only", "local", or "no network".
 - **Media too.** Image/video generation with Grok obeys the same isolation (generate in a temp
-  dir, move the file out). For image-only work, Codex or Gemini are preferred because they keep the
-  repo local. Video is Grok-only, so it runs isolated.
+  dir, move the file out). For image-only work, Codex or Gemini are preferred because they sent no
+  whole-repo bundle in the wire-test. Video is Grok-only, so it runs isolated.
 
 ---
 
@@ -170,27 +187,32 @@ future behaviour. Run the review separately.
 
 ## 7. Optional hardening (defense-in-depth, not a substitute for isolation)
 
-These reduce risk but do not make Grok "safe" for a private repo, and some are **community-reported
-and not documented by xAI** — verify them for your version, and remember they are *retention/
-telemetry* controls, not a guarantee that data never transmits.
+These reduce risk but do not make Grok "safe" for a private repo — they are *retention/telemetry*
+controls, not a guarantee that data never transmits. Labels below separate what xAI documents from
+what is only community-reported; verify for your version.
 
 - **`/privacy`** (official, in-CLI): toggles data retention and, per xAI, deletes previously synced
   data. Retention only, not transmission. Note on ZDR: the consumer OAuth-login CLI session (this
   incident's context) is **not** ZDR; per xAI, ZDR applies to Team/Enterprise accounts and to
   API-key use of Grok Build.
-- **`~/.grok/config.toml`** (community-reported, wire-verified only on 0.2.93, may change per
-  version): `[harness] disable_codebase_upload = true`, `[telemetry] trace_upload = false`,
-  `[features] telemetry = false`. To confirm a control is *local*, run Grok once and check the
-  `trace.upload.decision` log shows `trace_upload_source=config` or `env` — `source=remote` is not
-  local protection. Edit this yourself; the skill never writes your config.
+- **`~/.grok/config.toml`** kill-switches — mixed provenance:
+  `[telemetry] trace_upload = false` and `[features] telemetry = false` are **official settings**
+  (xAI configuration reference) and were **verified honored on 0.2.99** (2026-07-14, one setup:
+  setting them flipped the `trace.upload.decision` log from `trace_upload_source=remote` to
+  `config`). `[harness] disable_codebase_upload = true` is **community-reported** (recognized by
+  the binary; wire-verified only on 0.2.93, and its effect on the bundle channel is currently
+  unmeasurable — see the §4 update). To confirm a control is *local* on your setup, run Grok once
+  and check the log shows `trace_upload_source=config` or `env` — `source=remote` is not local
+  protection. Edit this yourself; the skill never writes your config.
 - **`[tools] respect_gitignore = true`** (official) limits search/read tools only; it does **not**
   stop the whole-repo bundle.
-- **Sandbox + tool-deny for the "second exposure."** Isolation stops the whole-repo bundle, but an
-  agentic Grok run can still read elsewhere on the machine via `Read`/`Bash`/MCP and send it as
-  model context. For a pure text relay, add `--sandbox strict` (macOS Seatbelt limits reads to the
-  CWD + system paths — pass the prompt inline, or copy a prompt file into the isolated CWD) and
-  `--deny 'Read' --deny 'Bash'`. Note: `--permission-mode dontAsk` is accepted but not yet enforced
-  (rely on `--sandbox` + `--deny`), and macOS does not block a child process's network.
+- **Sandbox + tool-deny for the "second exposure"** — baked into the canonical calls since v2.0.2
+  (see §5). If you write your own Grok invocations, mirror it: `--deny '*'` for a pure text relay,
+  plus `--sandbox strict` (pass the prompt inline, or copy a prompt file into the isolated CWD).
+  Caveats: the sandbox **fails open** for built-in profiles (warning + continue; only an explicit
+  custom profile refuses to start), any `--deny` rule also blocks the image/video tools (use
+  sandbox-only for media), `--permission-mode dontAsk` is accepted but not yet enforced, and macOS
+  does not block a child process's network.
 - **True zero egress:** if code must never leave the machine, do not use a cloud model at all — use
   a fully local model (e.g. via Ollama / LM Studio / MLX, connectable through
   `references/custom-targets.md`).

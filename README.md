@@ -20,19 +20,21 @@ is a single `git clone`; everything else on this page is detail for when you nee
 > of which files the model reads. This is confirmed by xAI's own Grok account on X and by independent
 > wire capture, and it is **not** stopped by `--disable-web-search` or by telling the model not to
 > read files. As of v2.0.0 this skill runs every Grok call **fail-closed**: isolated in an empty
-> non-git directory, never in your repo, and it refuses rather than risk leaking. (That isolation
-> stops the upload because a git bundle can only come from a git repo; we could not measure it
-> directly while xAI keeps the feature server-disabled, so SECURITY.md states it as a sound
-> inference, not a lab result.) Repo-context work is routed to Codex, Gemini, GLM, or Claude, which
-> a wire-test showed keep your repo local. If you have already used Grok Build in a real repo, read
-> **[SECURITY.md](SECURITY.md)**.
+> non-git directory, never in your repo, and it refuses rather than risk leaking; as of v2.0.2
+> every text relay also denies all of Grok's own tools (`--deny '*'`) and adds a best-effort
+> sandbox. (The isolation stops the upload because a git bundle can only come from a git repo; we
+> could not measure it directly while xAI keeps the feature server-disabled, so SECURITY.md states
+> it as a sound inference, not a lab result.) Repo-context work is routed to Codex, Gemini, GLM,
+> or Claude — a wire-test showed none of them send a whole-repo bundle (they are still cloud
+> models that transmit the files they actually read). If you have already used Grok Build in a
+> real repo, read **[SECURITY.md](SECURITY.md)**.
 
 ## What it can do
 
 - **Second opinions**: hand a diff, a bug, a PR review, or a design question to GPT, GLM,
   Grok, Gemini, or Claude
 - **Consensus**: send the same prompt to several models in parallel and compare answers
-- **Image / video generation**: headless, through Codex or Gemini (local) or Grok (isolated);
+- **Image / video generation**: headless, through Codex or Gemini (no repo bundle) or Grok (isolated);
   Grok is the only lane that also does video. The skill documents each CLI's quirks
 - **Scripting**: JSON output parsing and session resume for multi-turn work
 - **Safety rails**: a preflight gate (installed + logged in?), a provider-terms compliance gate

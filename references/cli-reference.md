@@ -275,31 +275,36 @@ if [ -z "$GROK_ISO" ] || ! command -v git >/dev/null 2>&1 || git -C "$GROK_ISO" 
   # dir landed inside a git repo (e.g. TMPDIR points into one). Either way, do not run Grok.
   echo "grok-relay: cannot isolate; refusing to run Grok" >&2
 else
-  ( cd "$GROK_ISO" && grok -p "…" -m grok-4.5 --disable-web-search 2>/dev/null )
+  ( cd "$GROK_ISO" && grok -p "…" -m grok-4.5 --disable-web-search --sandbox strict --deny '*' 2>/dev/null )
 fi
 [ -n "$GROK_ISO" ] && rm -rf "$GROK_ISO"
 ```
 
 **Per-user hardening (optional, defense-in-depth — never a substitute for isolation).** These are
-retention/telemetry controls, not a promise the data never transmits, and the config keys are
-**community-reported, not in xAI's official settings docs**, wire-verified only on 0.2.93, and may
-change per version — verify per version, treat as unverified:
+retention/telemetry controls, not a promise the data never transmits. Provenance is mixed — labels
+below; verify per version:
 - In-CLI **`/privacy`** (official) toggles data retention and, per xAI, deletes previously synced
   data. Retention, not transmission. Consumer opt-out is **not** ZDR — official ZDR is Team/
   Enterprise-only (docs.x.ai/build/enterprise).
-- `~/.grok/config.toml`: `[harness] disable_codebase_upload = true`, `[telemetry] trace_upload =
-  false`, `[features] telemetry = false` (community-reported). To confirm a control is LOCAL, run
-  Grok once and check the `trace.upload.decision` log shows `trace_upload_source=config` or `env` —
-  `source=remote` is not local protection. The skill only READS user config; it never writes it.
+- `~/.grok/config.toml`: `[telemetry] trace_upload = false` and `[features] telemetry = false` are
+  **official settings** (xAI configuration reference) and were **verified honored on 0.2.99**
+  (2026-07-14, one setup: setting them flipped `trace_upload_source` from `remote` to `config`).
+  `[harness] disable_codebase_upload = true` is **community-reported** (recognized by the binary;
+  wire-verified only on 0.2.93; its effect on the bundle channel is unmeasurable while uploads are
+  server-off). To confirm a control is LOCAL on your setup, run Grok once and check the
+  `trace.upload.decision` log shows `trace_upload_source=config` or `env` — `source=remote` is not
+  local protection. The skill only READS user config; it never writes it.
 - The official `[tools] respect_gitignore=true` limits search/read tools only; it does **not** stop
   the whole-repo bundle.
-- **Second exposure — Grok's own tools.** Isolation stops the repo *bundle*, but an agentic Grok
-  run can still read elsewhere via `Read`/`Bash`/MCP/absolute paths and send it as model context.
-  For a pure text relay, add `--sandbox strict` (macOS Seatbelt limits reads to CWD + system paths;
-  pass the prompt inline with `-p`, or copy a prompt file INTO the isolated CWD) and `--deny 'Read'
-  --deny 'Bash'`. Caveats: `--permission-mode dontAsk` is accepted but NOT yet enforced (rely on
-  `--sandbox` + `--deny`); macOS does not block a child process's network. See the "Second exposure"
-  and runtime kill-switch notes in `SKILL.md`.
+- **Second exposure — Grok's own tools** — baked into the canonical calls since v2.0.2: text
+  relays carry `--deny '*'` (verified on 0.2.99 — tools refused by policy, text still arrives)
+  plus `--sandbox strict` (limits reads to CWD + system paths; pass the prompt inline with `-p`,
+  or copy a prompt file INTO the isolated CWD). Caveats: the sandbox **fails open** for built-in
+  profiles (an inapplicable profile logs a warning and continues unenforced; only an explicit
+  custom profile refuses to start) — the deny rules and the isolation are the load-bearing parts;
+  any `--deny` rule also blocks the image/video tools, so media runs sandbox-only;
+  `--permission-mode dontAsk` is accepted but NOT yet enforced; macOS does not block a child
+  process's network. See the "Second exposure" and runtime kill-switch notes in `SKILL.md`.
 
 Headless via `-p`. Use `-m grok-4.5` — xAI's coding/agents frontier model (launched
 2026-07-08, trained with Cursor; 500K context; reasoning-effort supported, default `high`).
@@ -340,7 +345,7 @@ GROK_ISO="$(mktemp -d "${TMPDIR:-/tmp}/grok-iso.XXXXXX")"
 if [ -z "$GROK_ISO" ] || ! command -v git >/dev/null 2>&1 || git -C "$GROK_ISO" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   echo "grok-relay: cannot isolate; refusing Grok" >&2
 else
-  ( cd "$GROK_ISO" && RUST_LOG=debug grok -p "test" -m grok-4.5 --disable-web-search 2>/tmp/grok-debug.log ) &
+  ( cd "$GROK_ISO" && RUST_LOG=debug grok -p "test" -m grok-4.5 --disable-web-search --sandbox strict --deny '*' 2>/tmp/grok-debug.log ) &
   GROK_PID=$!; sleep 75; grep -c errorcode_502 /tmp/grok-debug.log; kill "$GROK_PID" 2>/dev/null
 fi
 [ -n "$GROK_ISO" ] && rm -rf "$GROK_ISO"
@@ -420,7 +425,7 @@ Walk this ladder in order and stop at the first verdict:
      echo "grok-relay: cannot isolate; refusing Grok" >&2
    else
      ( cd "$GROK_ISO" && perl -e 'alarm shift; exec @ARGV' 120 \
-         grok -p "Reply with exactly GROK_OK and nothing else." -m grok-4.5 --disable-web-search )
+         grok -p "Reply with exactly GROK_OK and nothing else." -m grok-4.5 --disable-web-search --sandbox strict --deny '*' )
    fi
    [ -n "$GROK_ISO" ] && rm -rf "$GROK_ISO"
    ```
@@ -513,11 +518,14 @@ So generate in an isolated non-git temp dir and move the artifact out afterward:
 
 ```bash
 # ISOLATED + fail-closed — never let grok's working dir be inside a real repo.
+# Sandbox-only: do NOT add --deny here — any deny rule also blocks the media tools (verified
+# on 0.2.99). The brief is copied INTO the dir (strict blocks reads outside the CWD).
 GROK_ISO="$(mktemp -d "${TMPDIR:-/tmp}/grok-iso.XXXXXX")"
 if [ -z "$GROK_ISO" ] || ! command -v git >/dev/null 2>&1 || git -C "$GROK_ISO" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   echo "grok-relay: cannot isolate; refusing Grok" >&2
 else
-  ( cd "$GROK_ISO" && grok --prompt-file /tmp/img-brief.md -m grok-4.5 --disable-web-search )
+  cp /tmp/img-brief.md "$GROK_ISO/img-brief.md"
+  ( cd "$GROK_ISO" && grok --prompt-file img-brief.md -m grok-4.5 --disable-web-search --sandbox strict )
   # find, not a brace glob: brace expansion is not POSIX and would silently drop the artifact
   # under dash, which the rm -rf below would then delete.
   find "$GROK_ISO" -type f \( -name '*.png' -o -name '*.jpg' -o -name '*.jpeg' -o -name '*.webp' -o -name '*.mp4' \) -exec mv {} /path/to/output-dir/ \;
@@ -530,9 +538,10 @@ in the current working directory. Print the saved absolute path on its own line 
 `SAVED:`. If you have no image tool, print `IMAGE TOOL: NONE`." Grok prints `SAVED: <path>`;
 read it, then move the file out of the temp dir. `--disable-web-search` does NOT disable the
 media tools AND does NOT stop the repo upload — isolation is the safeguard, not that flag.
-For image-only work, prefer Codex or agy (below): both keep the repo local, so they can write
-straight into your output dir. Live-verified: a `grok --prompt-file` run generated
-`blue-circle.jpg` (from an isolated dir the artifact is moved into place).
+For image-only work, prefer Codex or agy (below): neither sent a whole-repo bundle in the
+wire-test, so they can write straight into your output dir. Live-verified: a `grok --prompt-file`
+run generated `blue-circle.jpg` (from an isolated dir the artifact is moved into place), and a
+2026-07-14 run confirmed `image_gen` works under `--sandbox strict` (a `--deny` rule blocks it).
 
 ### GPT (Codex) — image_gen works headless (with an effort caveat)
 

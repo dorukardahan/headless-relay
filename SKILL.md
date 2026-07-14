@@ -2,7 +2,7 @@
 name: headless-relay
 description: Headless handoff guide for running other AI models from inside an agent session (any Agent Skills runtime - Claude Code, Codex, Grok Build, Cursor, OpenClaw, Hermes). Covers GPT (codex exec), GLM (opencode run or zcode --prompt), Grok (grok -p), Gemini (Antigravity agy -p), and Claude (claude -p or a subagent) - inline vs file prompts, parallel multi-model consensus, JSON output, session resume, image/video generation, provider-terms compliance. Use for "ask codex", "ask GLM", "ask grok", "ask gemini", "second opinion", "cross-model review", "generate an image", "run headless", "ask another model".
 license: MIT. Complete terms in LICENSE.txt
-metadata: {"version": "2.0.1"}
+metadata: {"version": "2.0.2"}
 ---
 
 # headless-relay
@@ -53,7 +53,8 @@ showed Codex, GLM (opencode), and Gemini (agy) send **no** whole-repo bundle.
 3. **If isolation cannot be guaranteed, do not run Grok.** Warn the user (link this section) and
    use another lane.
 4. **A task that genuinely needs repo or diff context must NOT go to Grok.** Route it to Codex,
-   Gemini, GLM, or Claude — all wire-verified to keep the repo local. Grok is text-in /
+   Gemini, GLM, or Claude — none of which sent a whole-repo bundle in the wire-test (they are
+   still cloud models that transmit the files they actually read). Grok is text-in /
    answer-out only.
 
 **Canonical isolated Grok call** — every Grok example below uses this shape:
@@ -65,7 +66,7 @@ GROK_ISO="$(mktemp -d "${TMPDIR:-/tmp}/grok-iso.XXXXXX")"
 if [ -z "$GROK_ISO" ] || ! command -v git >/dev/null 2>&1 || git -C "$GROK_ISO" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   echo "grok-relay: cannot isolate (mktemp failed, or temp dir is inside a git repo); refusing Grok" >&2
 else
-  ( cd "$GROK_ISO" && grok -p "your question here" -m grok-4.5 --disable-web-search 2>/dev/null )
+  ( cd "$GROK_ISO" && grok -p "your question here" -m grok-4.5 --disable-web-search --sandbox strict --deny '*' 2>/dev/null )
 fi
 [ -n "$GROK_ISO" ] && rm -rf "$GROK_ISO"
 ```
@@ -77,24 +78,32 @@ landed inside a git repo (e.g. a `TMPDIR` pointing into one). `--disable-web-sea
 output determinism; it does **nothing** for data egress. The isolation (empty non-git working
 directory) is the safeguard against the whole-repo bundle.
 
-**Second exposure — Grok's own tools.** Isolation stops the repo *bundle*, but an agentic Grok run
-can still read elsewhere on the machine through its `Read` / `Bash` / MCP tools or absolute paths
-and send what it reads to xAI as ordinary model context. For a pure text relay, harden the call:
-add `--sandbox strict` (macOS Seatbelt limits filesystem reads to the CWD + system paths — so pass
-the prompt inline with `-p`, or copy the prompt file INTO the isolated CWD, since a file outside
-CWD is then unreadable) and deny the tools you do not need (`--deny 'Read' --deny 'Bash'`, or a
-PreToolUse allow-list). Caveats, from xAI's own docs: `--permission-mode dontAsk` is accepted but
-**not yet enforced** (rely on `--sandbox` + `--deny`, not the mode), and macOS does not block a
-child process's network.
+**Second exposure — Grok's own tools — is why the call also carries `--deny '*'` and
+`--sandbox strict`.** Isolation stops the repo *bundle*, but an agentic Grok run can still read
+elsewhere on the machine through its `Read` / `Bash` / MCP tools or absolute paths and send what
+it reads to xAI as ordinary model context. A pure text relay needs no tools at all, so the
+canonical call denies all of them: `--deny '*'` (verified on grok 0.2.99 — tools are refused by
+policy, the text answer still arrives). `--sandbox strict` (macOS Seatbelt / Linux Landlock;
+limits filesystem reads to the CWD + system paths) is a second layer, but note it **fails open**:
+per xAI's own sandbox doc, when a built-in profile cannot be applied grok logs a warning and
+continues WITHOUT enforcement (only an explicitly-selected custom profile refuses to start). So
+treat `--deny '*'` and the isolation as the load-bearing parts and the sandbox as bonus. Because
+strict blocks reads outside the CWD, pass the prompt inline with `-p`, or copy a prompt file INTO
+the isolated dir. Two more caveats from xAI's docs: `--permission-mode dontAsk` is accepted but
+**not yet enforced** (never rely on the mode), and macOS does not block a child process's network.
+**Media is the one exception:** any `--deny` rule also blocks the image/video tools (verified on
+0.2.99), so the media recipe (Scenario H) runs sandbox-only.
 
 **Runtime kill-switch surface (secondary signal, never a guarantee).** As a preflight courtesy you
-MAY read the user's `~/.grok/config.toml` for the community kill-switches
-(`[harness] disable_codebase_upload`, `[telemetry] trace_upload`, `[features] telemetry`) and report
-their state — e.g. "your config does not disable the codebase upload; relying on isolation." Read
-only; never write the user's config, and never treat a present flag as proof (xAI controls whether
-the binary honours it — see the `trace_upload_source` note in the availability ladder). Full
-per-user hardening (those flags, the in-CLI `/privacy` retention command) is in
-[SECURITY.md](SECURITY.md); all of it is defense-in-depth, never a substitute for isolation.
+MAY read the user's `~/.grok/config.toml` for the kill-switches (`[telemetry] trace_upload` and
+`[features] telemetry` — official settings; `[harness] disable_codebase_upload` —
+community-reported) and report their state — e.g. "your config does not disable the codebase
+upload; relying on isolation." Read only; never write the user's config, and never treat a present
+flag as proof for the *bundle* channel: a 2026-07-14 check on 0.2.99 showed config-set values do
+flip `trace_upload_source` to `config` for the trace/telemetry channel, but the bundle switch
+stays unverifiable while uploads are server-off (see SECURITY.md §7). Full per-user hardening
+(those flags, the in-CLI `/privacy` retention command) is in [SECURITY.md](SECURITY.md); all of it
+is defense-in-depth, never a substitute for isolation.
 
 ## Preflight: is the model available?
 
@@ -199,11 +208,12 @@ zcode --prompt "your question here"
 
 # Grok — MUST run isolated (uploads your whole repo otherwise; see the Grok section above).
 #        --disable-web-search is output-determinism only, NOT a privacy control.
+#        --deny '*' + --sandbox strict close the second exposure (Grok's own tools).
 GROK_ISO="$(mktemp -d "${TMPDIR:-/tmp}/grok-iso.XXXXXX")"
 if [ -z "$GROK_ISO" ] || ! command -v git >/dev/null 2>&1 || git -C "$GROK_ISO" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   echo "grok-relay: cannot isolate; refusing Grok" >&2
 else
-  ( cd "$GROK_ISO" && grok -p "your question here" -m grok-4.5 --disable-web-search 2>/dev/null )
+  ( cd "$GROK_ISO" && grok -p "your question here" -m grok-4.5 --disable-web-search --sandbox strict --deny '*' 2>/dev/null )
 fi
 [ -n "$GROK_ISO" ] && rm -rf "$GROK_ISO"
 
@@ -220,7 +230,7 @@ claude -p "your question here" --model fable
 |--------------|------|---------|
 | Short, one line, no special chars | Inline argument or `echo … \|` | `codex exec "is this regex safe?"` |
 | Long, multi-line, or contains backticks / `$` / quotes / a diff | File + stdin | write `/tmp/handoff.md`, then `< /tmp/handoff.md` |
-| Programmatic content blocks | JSON flag | `grok --prompt-json '…'` (Grok, like any Grok call, must run isolated — see the Grok section; never run it in the caller's repo) |
+| Programmatic content blocks | JSON flag | `grok --prompt-json '…'` (Grok, like any Grok call, must run isolated with the same hardened flags — see the Grok section; never run it in the caller's repo) |
 
 **Why a file for anything non-trivial:** passing a long prompt inside `"…"` lets the shell
 interpret backticks (`` ` ``) as command substitution, `$` as variables, and newlines/quotes
@@ -245,12 +255,14 @@ cat /tmp/handoff.md | opencode run -m "zai-coding-plan/glm-5.2" --variant max
 zcode --prompt "$(cat /tmp/handoff.md)"
 
 # Grok: takes a file flag directly (not stdin) — but MUST run isolated (see the Grok section).
-# The prompt file is an absolute path, so it is still readable from the isolated working dir.
+# Copy the prompt file INTO the isolated dir: --sandbox strict blocks reads outside the CWD,
+# so an absolute path outside it may be unreadable.
 GROK_ISO="$(mktemp -d "${TMPDIR:-/tmp}/grok-iso.XXXXXX")"
 if [ -z "$GROK_ISO" ] || ! command -v git >/dev/null 2>&1 || git -C "$GROK_ISO" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   echo "grok-relay: cannot isolate; refusing Grok" >&2
 else
-  ( cd "$GROK_ISO" && grok --prompt-file /tmp/handoff.md -m grok-4.5 --disable-web-search 2>/dev/null )
+  cp /tmp/handoff.md "$GROK_ISO/handoff.md"
+  ( cd "$GROK_ISO" && grok --prompt-file handoff.md -m grok-4.5 --disable-web-search --sandbox strict --deny '*' 2>/dev/null )
 fi
 [ -n "$GROK_ISO" ] && rm -rf "$GROK_ISO"
 
@@ -286,7 +298,8 @@ cat /tmp/handoff.md | opencode run -m "zai-coding-plan/glm-5.2" --variant max > 
   if [ -z "$GI" ] || ! command -v git >/dev/null 2>&1 || git -C "$GI" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     echo "grok-relay: cannot isolate; refusing Grok" >&2
   else
-    ( cd "$GI" && grok --prompt-file /tmp/handoff.md -m grok-4.5 --disable-web-search )
+    cp /tmp/handoff.md "$GI/handoff.md"
+    ( cd "$GI" && grok --prompt-file handoff.md -m grok-4.5 --disable-web-search --sandbox strict --deny '*' )
   fi
   [ -n "$GI" ] && rm -rf "$GI"
 ) > /tmp/ans-grok.md 2>/dev/null &
@@ -328,8 +341,8 @@ machine-independent runs. OpenCode runs agentic with repo access in its default 
 
 **Grok must NOT be used for repo- or diff-context work at all** — running it inside a repo
 uploads the entire repo plus its git history (see the Grok section). For "read the repo /
-review the diff / run git", use Codex (above), Gemini, GLM, or Claude — all wire-verified to
-keep the repo local. `--disable-web-search` does not change this: it only affects Grok's
+review the diff / run git", use Codex (above), Gemini, GLM, or Claude — none of which sent a
+whole-repo bundle in the wire-test. `--disable-web-search` does not change this: it only affects Grok's
 web-search tool, never data egress. If you want Grok's take on a diff, paste the diff text into
 an isolated text-only Grok call — do not point Grok at the repo.
 
@@ -363,6 +376,8 @@ claude -p "now check the error paths" --resume "$sid"
 the equivalents. See [references/cli-reference.md](references/cli-reference.md). **Grok caveat:**
 resume runs from the working directory, which under the mandatory isolation is a throwaway temp
 dir — keep that dir alive for the whole session, or use another lane for multi-turn Grok work.
+Every resumed Grok call keeps the full canonical shape: isolation guards plus
+`--sandbox strict --deny '*'`.
 
 ### Scenario G — built-in code review of the current repo
 Use **Codex** for repo-diff review; its review affordance beats a hand-written prompt:
@@ -378,7 +393,8 @@ never point Grok at the repo itself.
 
 ### Scenario H — image / video generation (not just text)
 Media generation is model-agnostic — use whichever lane the user prefers. **Images**: Codex or
-Gemini (agy) generate them and keep everything local; Grok can too, but only under isolation.
+Gemini (agy) generate them with no whole-repo bundle (still cloud models that transmit what they
+read); Grok can too, but only under isolation.
 **Video**: only Grok has it (`image_to_video`, `reference_to_video`), so video means an isolated
 Grok call. The pattern: tell the model to call its image tool IMMEDIATELY, save to the working
 directory, print the path, then read it back.
@@ -409,11 +425,14 @@ non-git temp dir (NOT the output dir if that dir is inside a repo), then move th
 ```bash
 # Grok media — ISOLATED + fail-closed. Grok in a repo uploads the whole repo (see the Grok section).
 # --disable-web-search does NOT disable the media tools and does NOT stop egress; isolation does.
+# NOTE: sandbox-only here — do NOT add --deny: any deny rule also blocks the image/video tools
+# (verified on 0.2.99). The brief is copied INTO the dir (strict blocks reads outside the CWD).
 GROK_ISO="$(mktemp -d "${TMPDIR:-/tmp}/grok-iso.XXXXXX")"
 if [ -z "$GROK_ISO" ] || ! command -v git >/dev/null 2>&1 || git -C "$GROK_ISO" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   echo "grok-relay: cannot isolate; refusing Grok" >&2
 else
-  ( cd "$GROK_ISO" && grok --prompt-file /tmp/img-brief.md -m grok-4.5 --disable-web-search )
+  cp /tmp/img-brief.md "$GROK_ISO/img-brief.md"
+  ( cd "$GROK_ISO" && grok --prompt-file img-brief.md -m grok-4.5 --disable-web-search --sandbox strict )
   # Move artifacts out with find (brace globs are not POSIX and would silently drop files under
   # dash, which the following rm -rf would then delete):
   find "$GROK_ISO" -type f \( -name '*.png' -o -name '*.jpg' -o -name '*.jpeg' -o -name '*.webp' -o -name '*.mp4' \) -exec mv {} /path/to/output-dir/ \;
@@ -430,9 +449,9 @@ Per-target support (detail in [references/cli-reference.md](references/cli-refer
 
 | Target | Headless media generation |
 |--------|---------------------------|
-| GPT (Codex) | YES — built-in `image_gen` via `codex exec`; avoid `ultra` (auto-delegation spiral, `max` works in ~55s), close stdin (`</dev/null`), direct "call the tool now" prompt (verified: blue-circle + green-square PNGs). Local — no repo bundle |
-| Gemini (agy) | YES (image only) — native `generate_image`, no API key / no OpenRouter (Google login covers it), ~34s, writes to cwd (verified: orange-triangle JPG). Run SOLO — the agy parallel-burst hang applies. No native video tool. Local — no repo bundle |
-| Grok | YES — `image_gen` / `image_edit` / `image_to_video` / `reference_to_video`, Imagine backend; the ONLY lane with video. **Must run isolated** (uploads the whole repo otherwise — see the Grok section) |
+| GPT (Codex) | YES — built-in `image_gen` via `codex exec`; avoid `ultra` (auto-delegation spiral, `max` works in ~55s), close stdin (`</dev/null`), direct "call the tool now" prompt (verified: blue-circle + green-square PNGs). No whole-repo bundle (still a cloud image API) |
+| Gemini (agy) | YES (image only) — native `generate_image`, no API key / no OpenRouter (Google login covers it), ~34s, writes to cwd (verified: orange-triangle JPG). Run SOLO — the agy parallel-burst hang applies. No native video tool. No whole-repo bundle (still a cloud image API) |
+| Grok | YES — `image_gen` / `image_edit` / `image_to_video` / `reference_to_video`, Imagine backend; the ONLY lane with video. **Must run isolated** (uploads the whole repo otherwise — see the Grok section). Sandbox-only: `--sandbox strict` verified compatible with `image_gen`; a `--deny` rule blocks the media tools |
 | GLM / Claude | No headless image generation in these CLIs |
 
 ## Claude target: subprocess vs in-session subagent
@@ -463,7 +482,8 @@ while a same-provider second opinion should stay in-session as a subagent.
 6. **Grok is fail-closed.** Never run `grok` from the caller's repo, `$HOME`, or any dir with
    real data — it uploads the whole repo + git history to xAI (see the Grok section). Run every
    Grok call in a fresh non-git temp dir, context via prompt only; if that can't be guaranteed,
-   don't run Grok — warn the user and use Codex / Gemini / GLM / Claude, which keep the repo local.
+   don't run Grok — warn the user and use Codex / Gemini / GLM / Claude, which sent no whole-repo
+   bundle in the wire-test.
 
 ## Reference files
 
@@ -489,6 +509,7 @@ while a same-provider second opinion should stay in-session as a subagent.
 | `grok models` prints "You are not authenticated." — but a model list appears right below it | Cosmetic: the header mirrors the expired cached token read at process start; the same call then refreshes the token and fetches the catalog. A model list in the output means Grok is **available** — do not skip the lane. Only "not authenticated" with NO model list is real (auth.json missing → `grok login`; auth.json present → one bounded real call decides). See the Grok availability ladder in [references/cli-reference.md](references/cli-reference.md). `--yolo` / `--always-approve` are permission flags, never an auth fix |
 | Grok `-p` prints nothing for 2+ minutes (stderr may show `worker quit with fatal: Transport channel closed, when Auth(AuthorizationRequired)`, or nothing at all) | The run hangs instead of exiting. Kill it; if the fatal auth line is present run `grok login` and retry once; if it hangs again the relay/service side is down — skip Grok and report it. Always wrap unattended grok calls in a timeout |
 | Grok cites unrelated tweets / web pages | Missing `--disable-web-search` |
+| Grok says a tool was "blocked by policy" | Expected under the canonical `--deny '*'` — a text relay needs no tools, the text answer still arrives. For media generation use the sandbox-only recipe in Scenario H (any `--deny` rule blocks the media tools) |
 | Grok: `Couldn't set model 'grok-build': … "unknown model id"` | `grok-build` was retired from the CLI when grok-4.5 launched (July 2026) — use `-m grok-4.5` |
 | zcode: `Model config is missing. Create ~/.zcode/cli/config.json …` | One-time setup — follow the ZCode recipes in [references/cli-reference.md](references/cli-reference.md) |
 | `zcode login`: `OAuth response is not valid JSON` | Known open bug — skip login entirely; use the config-file or env-var recipe instead |
