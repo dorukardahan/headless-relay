@@ -3,10 +3,11 @@
 #
 # Grok Build leaks in three ways when run carelessly: (1) it uploads the whole tracked repo + git
 # history when run inside a repo; (2) it auto-loads your global ~/.grok/AGENTS.md / rules / MCP into
-# the model turn (verified 0.2.99); (3) its own tools can read elsewhere on the machine. From v2.0.3
-# the skill's defence is two helper functions (grok_relay / grok_media) that, for every Grok call,
-# run in an empty non-git temp dir (signature: `rev-parse --is-inside-work-tree`), with a clean
-# temporary `GROK_HOME`, tool denial (`--deny`), and `--sandbox strict` — all fail-closed.
+# the model turn (verified 0.2.99/0.2.101); (3) its own tools can read elsewhere on the machine. From
+# v2.0.3 the skill's defence is two helper functions (grok_relay / grok_media) that, for every Grok
+# call, run in an empty non-git temp dir (signature: `rev-parse --is-inside-work-tree`), with a clean
+# temporary `GROK_HOME`, a tool restriction (text: `--deny '*'`; media: a `--tools` allow-list), and
+# `--sandbox strict` — all fail-closed (v2.0.4: subshell `trap` cleanup + change-based token sync).
 #
 # This check fails if:
 #   1. a required security anchor (SECURITY.md, the SKILL/README/cli-reference/terms warnings) is gone;
@@ -17,7 +18,7 @@
 #          (`rev-parse --is-inside-work-tree` and `command -v git`), counted per call;
 #        - every raw RELAY call (grok -p / --single / --prompt-file / --prompt-json / --check /
 #          --resume / --continue / -r / -c) additionally needs `GROK_HOME`, `--sandbox strict`,
-#          and `--deny`, counted per call.
+#          and a tool restriction (`--deny` OR a `--tools` allow-list), counted per call.
 # Counting is per-block and layer-independent (a flag may sit on a line-continuation), so a raw call
 # that drops GROK_HOME, the sandbox, the deny, or a guard trips the count. Comment-only lines are
 # excluded, so prose mentions do not count. Helper invocations (`grok_relay "…"`, `grok_media …`)
@@ -75,7 +76,7 @@ for f in "SKILL.md" "references/cli-reference.md"; do
         # Benign non-egress commands (auth / version / help) need no guards at all.
         tb = code; nbenign = gsub(/grok +(login|--version|--help|-V|-h)/, "&", tb)
         ncall  = nany - nbenign          # every real grok call (relay + catalog) needs isolation guards
-        nrelay = nany - ncat - nbenign   # relay calls additionally need GROK_HOME / --sandbox / --deny
+        nrelay = nany - ncat - nbenign   # relay calls additionally need GROK_HOME / --sandbox / tool-restriction
         t3 = code; nguard = gsub(/rev-parse --is-inside-work-tree/, "&", t3)
         t4 = code; ngit   = gsub(/command -v git/, "&", t4)
         # Count only the load-bearing env ASSIGNMENT (GROK_HOME="…"), not variable-name references
@@ -83,7 +84,9 @@ for f in "SKILL.md" "references/cli-reference.md"; do
         # the check goes dead. (GROK_HOME_TMP= does not match GROK_HOME= : the char after E is "_".)
         t5 = code; nhome  = gsub(/GROK_HOME=/, "&", t5)
         t6 = code; nsand  = gsub(/--sandbox strict/, "&", t6)
-        t7 = code; ndeny  = gsub(/--deny/, "&", t7)
+        # Tool restriction = a --deny rule (text: --deny '*') OR a --tools allow-list (media). Either
+        # satisfies "the relay call restricts tools". Count both.
+        t7 = code; nrestrict = gsub(/--deny|--tools/, "&", t7)
         if (ncall > 0 && nguard < ncall) {
           printf "FAIL: %d raw Grok call(s) but only %d isolation guard(s) (rev-parse) in %s (block near line %d)\n", ncall, nguard, F, start; rc = 1
         }
@@ -96,8 +99,8 @@ for f in "SKILL.md" "references/cli-reference.md"; do
         if (nrelay > 0 && nsand < nrelay) {
           printf "FAIL: %d raw Grok relay call(s) but only %d with --sandbox strict in %s (block near line %d)\n", nrelay, nsand, F, start; rc = 1
         }
-        if (nrelay > 0 && ndeny < nrelay) {
-          printf "FAIL: %d raw Grok relay call(s) but only %d with --deny in %s (block near line %d)\n", nrelay, ndeny, F, start; rc = 1
+        if (nrelay > 0 && nrestrict < nrelay) {
+          printf "FAIL: %d raw Grok relay call(s) but only %d with tool restriction (--deny/--tools) in %s (block near line %d)\n", nrelay, nrestrict, F, start; rc = 1
         }
         inb = 0
       } else { inb = 1; code = ""; start = NR }
@@ -112,6 +115,6 @@ for f in "SKILL.md" "references/cli-reference.md"; do
 done
 
 if [ "$fail" -eq 0 ]; then
-  echo "OK: Grok data-egress safeguard intact (anchors + helpers present; every fenced raw Grok call is isolation-guarded, git-absent-guarded, clean-GROK_HOME'd, sandboxed, and tool-denied)."
+  echo "OK: Grok data-egress safeguard intact (anchors + helpers present; every fenced raw Grok call is isolation-guarded, git-absent-guarded, clean-GROK_HOME'd, sandboxed, and tool-restricted (--deny/--tools)."
 fi
 exit "$fail"
