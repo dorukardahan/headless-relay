@@ -264,20 +264,26 @@ skill's isolation guarantee rests on the architectural fact that a git bundle ca
 a git repo: an empty non-git working directory has no repo to bundle. Logically sound; re-verify
 with the wire-test above if xAI re-enables the feature.
 
-**Mandatory rule:** never run `grok` from the caller's repo, `$HOME`, or any dir with real data.
-Every call runs in a fresh empty non-git temp dir (context via `-p`/`--prompt-file` only), fail-
-closed if that cannot be guaranteed:
+**Mandatory rule (v2.0.3):** never run `grok` from the caller's repo, `$HOME`, or any dir with real
+data. Use the **`grok_relay` / `grok_media` helper functions defined in `SKILL.md`** — do not hand-
+roll a raw `grok` call. Each helper runs in a fresh empty non-git temp dir with a **clean, temporary
+`GROK_HOME`** (so no global `~/.grok/AGENTS.md` / rules / skills / MCP load into the model turn —
+§4a of [../SECURITY.md](../SECURITY.md)), denies tools, adds `--sandbox strict`, and fails closed if
+isolation cannot be guaranteed (`mktemp` failed, `git` absent, or the temp dir is inside a repo).
+The shape, for reference (the helper wraps exactly this):
 
 ```bash
-GROK_ISO="$(mktemp -d "${TMPDIR:-/tmp}/grok-iso.XXXXXX")"
-if [ -z "$GROK_ISO" ] || ! command -v git >/dev/null 2>&1 || git -C "$GROK_ISO" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-  # mktemp failed (empty var → cd no-op → Grok would run in the caller's repo), or the temp
-  # dir landed inside a git repo (e.g. TMPDIR points into one). Either way, do not run Grok.
+gh="$(mktemp -d "${TMPDIR:-/tmp}/grok-home.XXXXXX")"; iso="$(mktemp -d "${TMPDIR:-/tmp}/grok-iso.XXXXXX")"
+if [ -z "$gh" ] || [ -z "$iso" ] || ! command -v git >/dev/null 2>&1 || git -C "$iso" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   echo "grok-relay: cannot isolate; refusing to run Grok" >&2
 else
-  ( cd "$GROK_ISO" && grok -p "…" -m grok-4.5 --disable-web-search --sandbox strict --deny '*' 2>/dev/null )
+  [ -n "$XAI_API_KEY" ] || cp "$HOME/.grok/auth.json" "$gh/auth.json" 2>/dev/null
+  ( cd "$iso" && GROK_HOME="$gh" grok -p "…" -m grok-4.5 --disable-web-search --sandbox strict --deny '*' 2>/dev/null ); rc=$?
+  # Sync grok's refreshed token back, else a temp GROK_HOME discards the refresh and repeated
+  # relays rotate your real ~/.grok login out (xAI rotates refresh tokens). Success + non-empty.
+  [ -z "$XAI_API_KEY" ] && [ "$rc" = 0 ] && [ -s "$gh/auth.json" ] && cp "$gh/auth.json" "$HOME/.grok/.auth.relay.$$" && mv -f "$HOME/.grok/.auth.relay.$$" "$HOME/.grok/auth.json"
 fi
-[ -n "$GROK_ISO" ] && rm -rf "$GROK_ISO"
+rm -rf "$iso" "$gh"
 ```
 
 **Per-user hardening (optional, defense-in-depth — never a substitute for isolation).** These are
@@ -296,15 +302,22 @@ below; verify per version:
   local protection. The skill only READS user config; it never writes it.
 - The official `[tools] respect_gitignore=true` limits search/read tools only; it does **not** stop
   the whole-repo bundle.
-- **Second exposure — Grok's own tools** — baked into the canonical calls since v2.0.2: text
-  relays carry `--deny '*'` (verified on 0.2.99 — tools refused by policy, text still arrives)
-  plus `--sandbox strict` (limits reads to CWD + system paths; pass the prompt inline with `-p`,
-  or copy a prompt file INTO the isolated CWD). Caveats: the sandbox **fails open** for built-in
-  profiles (an inapplicable profile logs a warning and continues unenforced; only an explicit
-  custom profile refuses to start) — the deny rules and the isolation are the load-bearing parts;
-  any `--deny` rule also blocks the image/video tools, so media runs sandbox-only;
-  `--permission-mode dontAsk` is accepted but NOT yet enforced; macOS does not block a child
-  process's network. See the "Second exposure" and runtime kill-switch notes in `SKILL.md`.
+- **Global-rule leak — clean `GROK_HOME` (v2.0.3).** By default Grok loads your global
+  `~/.grok/AGENTS.md` / rules / skills / MCP into every model turn and sends them to xAI (verified
+  on 0.2.99; §4a of [../SECURITY.md](../SECURITY.md)). The `grok_relay` / `grok_media` helpers point
+  `GROK_HOME` at a throwaway temp dir seeded with only auth, which removes that egress and loads no
+  MCP. They copy Grok's refreshed token back to `~/.grok/auth.json` afterward (else the discarded
+  temp home would rotate your subscription login out over repeated relays); `XAI_API_KEY` skips the
+  copy. Because the home is clean, your `config.toml` kill-switches above do **not** apply to a relay
+  call — it relies on isolation + clean home + deny, not those flags.
+- **Second exposure — Grok's own tools** — baked into the helpers since v2.0.2/v2.0.3: text relays
+  carry `--deny '*'` (verified on 0.2.99 by forcing a tool call → `Denied by permission policy`)
+  plus `--sandbox strict`. Caveats: the sandbox **fails open** for built-in profiles (an inapplicable
+  profile warns and continues unenforced; only an explicit custom profile refuses to start) — the
+  clean home, deny rules, and isolation are the load-bearing parts; `--deny '*'` also blocks the
+  image/video tools, so `grok_media` denies non-media tools by NAME instead; `--permission-mode
+  dontAsk` is accepted but NOT yet enforced; macOS does not block a child process's network. See the
+  helper definitions and kill-switch notes in `SKILL.md`.
 
 Headless via `-p`. Use `-m grok-4.5` — xAI's coding/agents frontier model (launched
 2026-07-08, trained with Cursor; 500K context; reasoning-effort supported, default `high`).
@@ -340,15 +353,20 @@ fatal: Transport channel closed, when Auth(AuthorizationRequired)`, and a silent
 stderr error at all even after a fresh login). Diagnose definitively before blaming auth:
 
 ```bash
-# Run this diagnostic ISOLATED + fail-closed (it is a real grok -p — see the isolation block).
+# Run this diagnostic ISOLATED + fail-closed (it is a real grok -p — same shape as grok_relay).
+GROK_HOME_TMP="$(mktemp -d "${TMPDIR:-/tmp}/grok-home.XXXXXX")"
 GROK_ISO="$(mktemp -d "${TMPDIR:-/tmp}/grok-iso.XXXXXX")"
-if [ -z "$GROK_ISO" ] || ! command -v git >/dev/null 2>&1 || git -C "$GROK_ISO" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+if [ -z "$GROK_HOME_TMP" ] || [ -z "$GROK_ISO" ] || ! command -v git >/dev/null 2>&1 || git -C "$GROK_ISO" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   echo "grok-relay: cannot isolate; refusing Grok" >&2
 else
-  ( cd "$GROK_ISO" && RUST_LOG=debug grok -p "test" -m grok-4.5 --disable-web-search --sandbox strict --deny '*' 2>/tmp/grok-debug.log ) &
+  [ -n "$XAI_API_KEY" ] || cp "$HOME/.grok/auth.json" "$GROK_HOME_TMP/auth.json" 2>/dev/null
+  ( cd "$GROK_ISO" && GROK_HOME="$GROK_HOME_TMP" RUST_LOG=debug grok -p "test" -m grok-4.5 --disable-web-search --sandbox strict --deny '*' 2>/tmp/grok-debug.log ) &
   GROK_PID=$!; sleep 75; grep -c errorcode_502 /tmp/grok-debug.log; kill "$GROK_PID" 2>/dev/null
+  # No token sync-back here: this call is deliberately KILLED, so the temp token state is
+  # indeterminate — do not copy it back. This one-off diagnostic may rotate your token once; if it
+  # logs you out, run `grok login`, or set XAI_API_KEY to avoid the token copy entirely.
 fi
-[ -n "$GROK_ISO" ] && rm -rf "$GROK_ISO"
+[ -n "$GROK_ISO" ] && rm -rf "$GROK_ISO" "$GROK_HOME_TMP"
 ```
 
 A nonzero count means xAI's inference proxy (`cli-chat-proxy.grok.com`) is returning Cloudflare
@@ -419,15 +437,19 @@ Walk this ladder in order and stop at the first verdict:
    call — at most one, never a retry loop:
 
    ```bash
-   # Run the sentinel ISOLATED + fail-closed — it is a real grok -p and would otherwise bundle the repo.
+   # Run the sentinel ISOLATED + fail-closed — it is a real grok -p (same shape as grok_relay).
+   GROK_HOME_TMP="$(mktemp -d "${TMPDIR:-/tmp}/grok-home.XXXXXX")"
    GROK_ISO="$(mktemp -d "${TMPDIR:-/tmp}/grok-iso.XXXXXX")"
-   if [ -z "$GROK_ISO" ] || ! command -v git >/dev/null 2>&1 || git -C "$GROK_ISO" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+   if [ -z "$GROK_HOME_TMP" ] || [ -z "$GROK_ISO" ] || ! command -v git >/dev/null 2>&1 || git -C "$GROK_ISO" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
      echo "grok-relay: cannot isolate; refusing Grok" >&2
    else
-     ( cd "$GROK_ISO" && perl -e 'alarm shift; exec @ARGV' 120 \
-         grok -p "Reply with exactly GROK_OK and nothing else." -m grok-4.5 --disable-web-search --sandbox strict --deny '*' )
+     [ -n "$XAI_API_KEY" ] || cp "$HOME/.grok/auth.json" "$GROK_HOME_TMP/auth.json" 2>/dev/null
+     ( cd "$GROK_ISO" && GROK_HOME="$GROK_HOME_TMP" perl -e 'alarm shift; exec @ARGV' 120 \
+         grok -p "Reply with exactly GROK_OK and nothing else." -m grok-4.5 --disable-web-search --sandbox strict --deny '*' ); rc=$?
+     # sync refreshed token back (see grok_relay): a temp GROK_HOME would else rotate your login out
+     [ -z "$XAI_API_KEY" ] && [ "$rc" = 0 ] && [ -s "$GROK_HOME_TMP/auth.json" ] && cp "$GROK_HOME_TMP/auth.json" "$HOME/.grok/.auth.relay.$$" && mv -f "$HOME/.grok/.auth.relay.$$" "$HOME/.grok/auth.json"
    fi
-   [ -n "$GROK_ISO" ] && rm -rf "$GROK_ISO"
+   [ -n "$GROK_ISO" ] && rm -rf "$GROK_ISO" "$GROK_HOME_TMP"
    ```
 
    If the session is about to send Grok a real prompt anyway, skip the sentinel and run that
@@ -512,36 +534,25 @@ the higher-quality Imagine model"):
 | `reference_to_video` | multi-image references + prompt → video |
 
 There is no dedicated flag — you drive the tool through the prompt. Grok is the **only** lane with
-video (`image_to_video` / `reference_to_video`). But the same **data-egress rule applies to media**:
-running Grok in a repo uploads the whole repo (see the isolation block at the top of this section).
-So generate in an isolated non-git temp dir and move the artifact out afterward:
+video (`image_to_video` / `reference_to_video`). The same **data-egress rules apply to media**
+(repo bundle + global-rule leak), so media goes through the **`grok_media` helper defined in
+`SKILL.md`**: isolated non-git CWD, clean `GROK_HOME`, `--sandbox strict`, and every NON-media tool
+denied by name (`--deny '*'` would block `image_gen` too — verified on 0.2.99). `image_gen` writes
+under the temp `GROK_HOME`; the helper `find`s the artifact and moves it to your output dir.
 
 ```bash
-# ISOLATED + fail-closed — never let grok's working dir be inside a real repo.
-# Sandbox-only: do NOT add --deny here — any deny rule also blocks the media tools (verified
-# on 0.2.99). The brief is copied INTO the dir (strict blocks reads outside the CWD).
-GROK_ISO="$(mktemp -d "${TMPDIR:-/tmp}/grok-iso.XXXXXX")"
-if [ -z "$GROK_ISO" ] || ! command -v git >/dev/null 2>&1 || git -C "$GROK_ISO" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-  echo "grok-relay: cannot isolate; refusing Grok" >&2
-else
-  cp /tmp/img-brief.md "$GROK_ISO/img-brief.md"
-  ( cd "$GROK_ISO" && grok --prompt-file img-brief.md -m grok-4.5 --disable-web-search --sandbox strict )
-  # find, not a brace glob: brace expansion is not POSIX and would silently drop the artifact
-  # under dash, which the rm -rf below would then delete.
-  find "$GROK_ISO" -type f \( -name '*.png' -o -name '*.jpg' -o -name '*.jpeg' -o -name '*.webp' -o -name '*.mp4' \) -exec mv {} /path/to/output-dir/ \;
-fi
-[ -n "$GROK_ISO" ] && rm -rf "$GROK_ISO"
+grok_media /tmp/img-brief.md /path/to/output-dir
 ```
 
 where the brief instructs: "Use your `image_gen` tool to generate <description>. Save the file
 in the current working directory. Print the saved absolute path on its own line prefixed with
-`SAVED:`. If you have no image tool, print `IMAGE TOOL: NONE`." Grok prints `SAVED: <path>`;
-read it, then move the file out of the temp dir. `--disable-web-search` does NOT disable the
-media tools AND does NOT stop the repo upload — isolation is the safeguard, not that flag.
+`SAVED:`. If you have no image tool, print `IMAGE TOOL: NONE`." `--disable-web-search` does NOT
+disable the media tools AND does NOT stop the repo upload — isolation + clean home are the
+safeguards, not that flag.
 For image-only work, prefer Codex or agy (below): neither sent a whole-repo bundle in the
-wire-test, so they can write straight into your output dir. Live-verified: a `grok --prompt-file`
-run generated `blue-circle.jpg` (from an isolated dir the artifact is moved into place), and a
-2026-07-14 run confirmed `image_gen` works under `--sandbox strict` (a `--deny` rule blocks it).
+wire-test, so they can write straight into your output dir. Live-verified on 0.2.99: `image_gen`
+runs under `grok_media`'s isolation + clean `GROK_HOME` + `--sandbox strict` with every non-media
+tool denied by name (a blanket `--deny '*'` blocks `image_gen`, which is why media denies by name).
 
 ### GPT (Codex) — image_gen works headless (with an effort caveat)
 

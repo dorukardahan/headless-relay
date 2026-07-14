@@ -6,11 +6,15 @@ including a tracked `.env`) to xAI-controlled cloud storage, regardless of which
 actually reads. This is confirmed by xAI's own account and by independent wire capture. From
 **v2.0.0**, headless-relay runs every Grok call **fail-closed**: isolated in an empty, non-git
 temporary directory, never in your repository, and it refuses rather than risk a leak. From
-**v2.0.2**, every text relay additionally denies all of Grok's own tools (`--deny '*'`) and adds a
-best-effort sandbox (`--sandbox strict`), closing the "second exposure" (§5). Repo- and
-diff-context work is routed to Codex, Gemini, GLM, or Claude, which a wire-test showed send no
-whole-repo bundle (they are still cloud models that transmit the files they actually read). The
-other four lanes are unaffected.
+**v2.0.3** every Grok call goes through two helper functions (`grok_relay` / `grok_media`) that add
+two more layers: a **clean, temporary `GROK_HOME`** so Grok cannot load your global
+`~/.grok/AGENTS.md`, rules, skills, or MCP servers into the model turn (a real egress, verified on
+0.2.99 — see §4a), and **tool denial** (`--deny '*'` for text; non-media tools denied by name for
+media) plus a best-effort `--sandbox strict`. These narrow the exposure to the prompt itself; they
+do **not** make Grok local — it is still a cloud model, and what you put in the prompt still goes
+to xAI. Repo- and diff-context work is routed to Codex, Gemini, GLM, or Claude, which a wire-test
+showed send no whole-repo bundle (they are still cloud models that transmit the files they actually
+read). The other four lanes are unaffected.
 
 This document exists so that a user who has never heard of the incident cannot be surprised by
 it, and so anyone who already used Grok Build can assess and contain their exposure.
@@ -118,6 +122,28 @@ channel** those config keys are honored locally on 0.2.99. The **bundle** switch
 (`disable_codebase_upload`) still cannot be independently verified: with uploads globally off, the
 codebase-upload path never fires, so there is no observable effect to measure. See §7.
 
+### 4a. Global rules load into the model turn (2026-07-14, grok 0.2.99)
+
+A separate egress, independent of the bundle, was confirmed on 0.2.99: Grok auto-loads **global
+project rules from `~/.grok/`** — in particular `~/.grok/AGENTS.md` — into the model context on
+every call, and sends it to xAI as part of the turn. Across five isolated canary sessions (empty
+non-git dir, `--sandbox strict`, `--deny '*'`), the global `AGENTS.md` content appeared in each
+session's model-turn record: 2 of 3 sampled content slices matched verbatim, and the leaking
+transcripts ran ~5 KB larger than a clean-`GROK_HOME` run (consistent with the full ~5,367-char
+file), while a clean `GROK_HOME` dropped this to 0 of 3. Grok's own doc (`12-project-rules.md`)
+states global rules from `~/.grok/` apply to all projects. `--system-prompt-override` did **not** suppress it (the rules load
+as a separate context block). Running with a **clean, temporary `GROK_HOME`** (seeded only with
+auth) removed it entirely — verified: the `AGENTS.md` content no longer appeared, no MCP servers
+loaded, and auth still worked. This is why v2.0.3 routes every call through a clean `GROK_HOME`
+(§5). Catalog fetches (`grok models`) send no model turn, so they do not leak this way.
+
+**Re-confirmed on grok 0.2.101 (2026-07-14):** after the CLI self-updated from 0.2.99 to 0.2.101,
+every v2.0.3 behavior reproduced identically — the default leak persists, the clean `GROK_HOME`
+stops it, `--deny '*'` refuses a forced tool call, `grok_media`'s by-name denial keeps `image_gen`
+working, and three back-to-back `grok_relay` calls left the real `~/.grok` login intact (the
+token sync-back, §5). The "verified on 0.2.99" notes elsewhere in this doc therefore hold on
+0.2.101 as well.
+
 During the measured window the alternative lanes (Codex, GLM, Gemini) sent no whole-repo bundle.
 Each figure is a single whole-machine egress run (n=1, no per-process backstop), so this excludes
 a *synchronous* whole-repo bundle at the ~100x margin but not a deferred/async upload after the
@@ -127,29 +153,45 @@ is routed to them rather than to Grok.
 
 ---
 
-## 5. What headless-relay does about it (v2.0.0+)
+## 5. What headless-relay does about it (v2.0.0 → v2.0.3)
 
-- **Fail-closed isolation.** Every Grok call runs in a fresh, empty, non-git temporary directory,
-  with context passed only through the prompt / prompt file. No repository in the working
-  directory means no git repository to bundle. If isolation cannot be guaranteed — `mktemp`
-  failed, the temp dir landed inside a git repo, or (since v2.0.1) the `git` binary is absent so
-  the check cannot verify — the skill refuses to run Grok and says why. Keep `TMPDIR` out of your
-  repositories; on a normal machine `mktemp` uses `/tmp` or `/var/folders`, never a repo.
-- **Tools denied, sandbox added (v2.0.2) — the "second exposure".** Isolation stops the repo
-  bundle, but an agentic Grok run could still read elsewhere on the machine via its
-  `Read`/`Bash`/MCP tools and send that as ordinary model context. A pure text relay needs no
-  tools, so the canonical call denies all of them (`--deny '*'` — verified on 0.2.99: tools are
-  refused by policy, the text answer still arrives) and adds `--sandbox strict` as a second layer.
-  The sandbox **fails open** (per xAI's docs, an inapplicable built-in profile logs a warning and
-  continues unenforced; only an explicit custom profile refuses to start), so the deny rules and
-  the isolation are the load-bearing parts. Media calls run sandbox-only, because any `--deny`
-  rule also blocks the image/video tools (verified on 0.2.99).
+From v2.0.3 every Grok call goes through one of two helper functions (`grok_relay` for text,
+`grok_media` for image/video) defined in SKILL.md. Each layer below is applied by the helper:
+
+- **Fail-closed isolation.** Every Grok call runs in a fresh, empty, non-git temporary directory.
+  No repository in the working directory means no git repository to bundle. If isolation cannot be
+  guaranteed — `mktemp` failed, the temp dir landed inside a git repo, or (since v2.0.1) the `git`
+  binary is absent so the check cannot verify — the helper refuses to run Grok and says why. Keep
+  `TMPDIR` out of your repositories; on a normal machine `mktemp` uses `/tmp` or `/var/folders`.
+- **Clean `GROK_HOME` (v2.0.3) — the global-rule leak.** By default Grok loads your global
+  `~/.grok/AGENTS.md`, rules, skills, and MCP servers into every model turn and sends them to xAI
+  (§4a). The helper points `GROK_HOME` at a throwaway temp dir seeded with only auth (a copied
+  token, or `XAI_API_KEY`), so none of that loads — verified on 0.2.99. This is the layer that
+  makes the "isolated" call actually free of your machine's global context. **Auth caveat:** Grok
+  refreshes the token during the call and xAI rotates refresh tokens, so a temp home that discarded
+  the refresh would rotate your real `~/.grok` login OUT over repeated relays. The helper therefore
+  copies the refreshed token back to `~/.grok/auth.json` (atomic, success-only); set `XAI_API_KEY`
+  to avoid the token copy entirely.
+- **Tools denied (v2.0.2, mechanism proven v2.0.3) — the "second exposure".** An agentic Grok run
+  could otherwise read elsewhere on the machine via its `run_terminal_command` / `read_file` / MCP
+  tools and send that as model context. `grok_relay` denies all of them with `--deny '*'`; verified
+  on 0.2.99 by forcing a tool call, which the run refused with `Denied by permission policy: deny
+  rule on any tool matching "*"`. `grok_media` cannot use `--deny '*'` (it would block `image_gen`),
+  so it denies every non-media tool by name and leaves the four media tools usable (verified).
+- **`--sandbox strict` is a second layer only.** It **fails open**: per xAI's docs, when a built-in
+  profile can't be applied Grok warns and continues unenforced (only an explicit *custom* profile
+  refuses to start). So isolation, the clean home, and the deny rules are load-bearing; the sandbox
+  is a bonus. `--permission-mode dontAsk` is accepted but not yet enforced; macOS does not block a
+  child's network.
+- **Still a cloud model, not "local".** The layers above stop the repo bundle, the global-rule
+  leak, and tool-driven reads. They do **not** stop the prompt you pass or Grok's reasoning from
+  reaching xAI. The Grok lane is never described as "read-only", "local", or "no network".
 - **No repo-context Grok.** "Read the repo", "review the diff", or any task that needs repository
-  access is never sent to Grok. It goes to Codex, Gemini, GLM, or Claude, which sent no whole-repo bundle in the wire-test (still cloud models that transmit the files they actually read).
-- **Honest labelling.** The Grok lane is never described as "read-only", "local", or "no network".
-- **Media too.** Image/video generation with Grok obeys the same isolation (generate in a temp
-  dir, move the file out). For image-only work, Codex or Gemini are preferred because they sent no
-  whole-repo bundle in the wire-test. Video is Grok-only, so it runs isolated.
+  access is never sent to Grok. It goes to Codex, Gemini, GLM, or Claude, which sent no whole-repo
+  bundle in the wire-test (still cloud models that transmit the files they actually read).
+- **Media too.** `grok_media` applies the same isolation + clean `GROK_HOME` + sandbox + non-media
+  tool denial, then moves the artifact out of the temp home. For image-only work, Codex or Gemini
+  are preferred (no whole-repo bundle). Video is Grok-only, so it runs through `grok_media`.
 
 ---
 
@@ -206,12 +248,20 @@ what is only community-reported; verify for your version.
   protection. Edit this yourself; the skill never writes your config.
 - **`[tools] respect_gitignore = true`** (official) limits search/read tools only; it does **not**
   stop the whole-repo bundle.
-- **Sandbox + tool-deny for the "second exposure"** — baked into the canonical calls since v2.0.2
-  (see §5). If you write your own Grok invocations, mirror it: `--deny '*'` for a pure text relay,
-  plus `--sandbox strict` (pass the prompt inline, or copy a prompt file into the isolated CWD).
-  Caveats: the sandbox **fails open** for built-in profiles (warning + continue; only an explicit
-  custom profile refuses to start), any `--deny` rule also blocks the image/video tools (use
-  sandbox-only for media), `--permission-mode dontAsk` is accepted but not yet enforced, and macOS
+- **Clean `GROK_HOME` for the global-rule leak** — the `grok_relay` / `grok_media` helpers (v2.0.3,
+  §5) point `GROK_HOME` at a throwaway temp dir seeded with only auth, so Grok cannot load your
+  global `~/.grok/AGENTS.md` / rules / skills / MCP into the model turn (§4a). If you write your own
+  Grok invocation, do the same: `GROK_HOME="$(mktemp -d)"` with `auth.json` copied in (or
+  `XAI_API_KEY` set) — AND copy the refreshed `auth.json` back to `~/.grok/` afterward, or repeated
+  runs will rotate your subscription login out (xAI rotates refresh tokens; a discarded temp home
+  loses the refresh). Note this also means your `config.toml` kill-switches above do **not** apply
+  to such a call — a relay relies on isolation + deny + clean home, not on those flags.
+- **Sandbox + tool-deny for the "second exposure"** — baked into the helpers since v2.0.2/v2.0.3
+  (see §5). If you write your own invocation, mirror it: `--deny '*'` for a text relay (verified on
+  0.2.99 to refuse a forced tool call), non-media tools denied by name for media, plus
+  `--sandbox strict`. Caveats: the sandbox **fails open** for built-in profiles (warning + continue;
+  only an explicit custom profile refuses to start), `--deny '*'` also blocks the image/video tools
+  (deny by name for media), `--permission-mode dontAsk` is accepted but not yet enforced, and macOS
   does not block a child process's network.
 - **True zero egress:** if code must never leave the machine, do not use a cloud model at all — use
   a fully local model (e.g. via Ollama / LM Studio / MLX, connectable through

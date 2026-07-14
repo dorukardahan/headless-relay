@@ -20,14 +20,17 @@ is a single `git clone`; everything else on this page is detail for when you nee
 > of which files the model reads. This is confirmed by xAI's own Grok account on X and by independent
 > wire capture, and it is **not** stopped by `--disable-web-search` or by telling the model not to
 > read files. As of v2.0.0 this skill runs every Grok call **fail-closed**: isolated in an empty
-> non-git directory, never in your repo, and it refuses rather than risk leaking; as of v2.0.2
-> every text relay also denies all of Grok's own tools (`--deny '*'`) and adds a best-effort
-> sandbox. (The isolation stops the upload because a git bundle can only come from a git repo; we
-> could not measure it directly while xAI keeps the feature server-disabled, so SECURITY.md states
-> it as a sound inference, not a lab result.) Repo-context work is routed to Codex, Gemini, GLM,
-> or Claude — a wire-test showed none of them send a whole-repo bundle (they are still cloud
-> models that transmit the files they actually read). If you have already used Grok Build in a
-> real repo, read **[SECURITY.md](SECURITY.md)**.
+> non-git directory, never in your repo, and it refuses rather than risk leaking. As of **v2.0.3**
+> every Grok call goes through two helper functions that add a clean, temporary `GROK_HOME` (so
+> Grok can't load your global `~/.grok/AGENTS.md` / rules / MCP into the model turn — a real egress,
+> verified on grok 0.2.99 and 0.2.101) and deny Grok's own tools (`--deny '*'`), plus a best-effort sandbox. These
+> narrow the exposure to the prompt itself — they do **not** make Grok local; it is still a cloud
+> model. (The isolation stops the bundle because a git bundle can only come from a git repo; we
+> could not measure that directly while xAI server-disables the feature, so SECURITY.md states it
+> as a sound inference, not a lab result.) Repo-context work is routed to Codex, Gemini, GLM, or
+> Claude — a wire-test showed none of them send a whole-repo bundle (they are still cloud models
+> that transmit the files they actually read). If you have already used Grok Build in a real repo,
+> read **[SECURITY.md](SECURITY.md)**.
 
 ## What it can do
 
