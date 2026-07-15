@@ -2,7 +2,7 @@
 name: headless-relay
 description: Headless handoff guide for running other AI models from inside an agent session (any Agent Skills runtime - Claude Code, Codex, Grok Build, Cursor, OpenClaw, Hermes). Covers GPT (codex exec), GLM (opencode run or zcode --prompt), Grok (grok -p), Gemini (Antigravity agy -p), and Claude (claude -p or a subagent) - inline vs file prompts, parallel multi-model consensus, JSON output, session resume, image/video generation, provider-terms compliance. Use for "ask codex", "ask GLM", "ask grok", "ask gemini", "second opinion", "cross-model review", "generate an image", "run headless", "ask another model".
 license: MIT. Complete terms in LICENSE.txt
-metadata: {"version": "2.0.4"}
+metadata: {"version": "2.0.5"}
 ---
 
 # headless-relay
@@ -50,13 +50,14 @@ showed Codex, GLM (opencode), and Gemini (agy) send **no** whole-repo bundle.
    only via `-p` / `--prompt-file`. No repo in the working directory → no git repo to bundle.
    (Logically sound; it could not be empirically confirmed in the 2026-07-13 test because xAI
    currently server-suppresses the feature — re-verify if they re-enable it.)
-3. **Every Grok call also runs with a clean, temporary `GROK_HOME`** (v2.0.3). Grok otherwise
-   auto-loads your global `~/.grok/AGENTS.md`, rules, skills, and MCP servers into the model turn
-   and sends them to xAI — verified on grok 0.2.99 and 0.2.101: the full global `AGENTS.md` appeared
-   in the model context even from an empty non-git dir with `--sandbox strict --deny '*'`. A clean `GROK_HOME`
-   (seeded only with auth) removes that global context, narrowing what leaves your machine to the
-   prompt itself. It does **not** make Grok local — see the "Not pure text-in / answer-out" note
-   below the helpers.
+3. **Every Grok call also runs with a clean, temporary `GROK_HOME` and a synthetic `HOME`**
+   (v2.0.3–2.0.5). Grok otherwise auto-loads your global `~/.grok/AGENTS.md` **and** — via its
+   Claude/Cursor compat scanners — your `~/.claude/CLAUDE.md`, `~/.claude/settings.json` hooks,
+   skills, plugins, and `~/.claude.json` MCP servers into the model turn, sending them to xAI
+   (verified on grok 0.2.99 / 0.2.101). Pointing both `GROK_HOME` and (for the grok process only)
+   `HOME` at a throwaway temp, plus a minimal config that disables every compat cell, removes that
+   global context — narrowing what leaves your machine to the prompt itself. It does **not** make
+   Grok local — see the "Not pure text-in / answer-out" note below the helpers.
 4. **If isolation cannot be guaranteed, do not run Grok.** Warn the user (link this section) and
    use another lane.
 5. **A task that genuinely needs repo or diff context must NOT go to Grok.** Route it to Codex,
@@ -64,11 +65,11 @@ showed Codex, GLM (opencode), and Gemini (agy) send **no** whole-repo bundle.
    still cloud models that transmit the files they actually read). Grok relays only the prompt you
    give it — never point it at the repo.
 
-**Two helper functions — define once, use for EVERY Grok call.** Isolation stops the repo bundle;
-a clean `GROK_HOME` (with a minimal safe config) stops the global-rule leak; tool restriction stops
-the tools. Each helper is a **subshell** (`name() ( … )`, not `{ … }`) so its `trap` cleans up the
-temp dirs on every exit path — normal return, error, or a kill signal. Paste these once; every Grok
-example below is then a one-liner `grok_relay` / `grok_media` call.
+**Two helper functions — define once, use for EVERY Grok call.** Isolation stops the repo bundle; a
+clean `GROK_HOME` + synthetic `HOME` (with a minimal safe config) stop the global-rule / `~/.claude`
+leak; tool restriction stops the tools. Each helper is a **subshell** (`name() ( … )`, not `{ … }`)
+so its `trap` cleans up the temp dirs on every exit path — normal return, error, or a kill signal.
+Paste these once; every Grok example below is then a one-liner `grok_relay` / `grok_media` call.
 
 ```bash
 # grok_relay — TEXT relay. No repo bundle (empty non-git CWD), no global-rule leak (clean
@@ -81,16 +82,19 @@ grok_relay() (
      || git -C "$iso" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     echo "grok-relay: cannot isolate (mktemp failed, git absent, or temp in a repo); refusing Grok" >&2; exit 1
   fi
-  # minimal SAFE config in the clean home: telemetry/upload off, and the Claude/Cursor rule
-  # scanners + MCP servers disabled (mcps=false). No global ~/.grok AGENTS.md/rules reaches the turn.
-  printf '[features]\ntelemetry = false\n[telemetry]\ntrace_upload = false\n[harness]\ndisable_codebase_upload = true\n[compat.claude]\nskills = false\nrules = false\nmcps = false\n[compat.cursor]\nskills = false\nrules = false\nmcps = false\n' > "$gh/config.toml"
+  # minimal SAFE config in the clean home: telemetry/upload off, and EVERY Claude/Cursor compat cell
+  # (skills/rules/agents/mcps/hooks/sessions) disabled — belt-and-suspenders to the synthetic HOME below.
+  printf '[features]\ntelemetry = false\n[telemetry]\ntrace_upload = false\n[harness]\ndisable_codebase_upload = true\n[compat.claude]\nskills = false\nrules = false\nagents = false\nmcps = false\nhooks = false\nsessions = false\n[compat.cursor]\nskills = false\nrules = false\nagents = false\nmcps = false\nhooks = false\nsessions = false\n' > "$gh/config.toml"
   # Auth: copy the subscription token in (or set XAI_API_KEY, metered, to skip the copy entirely).
   [ -n "$XAI_API_KEY" ] || { cp "$HOME/.grok/auth.json" "$gh/auth.json" 2>/dev/null; seed="$(cksum < "$gh/auth.json" 2>/dev/null)"; }
-  ( cd "$iso" && GROK_HOME="$gh" grok -p "$1" -m grok-4.5 --disable-web-search --sandbox strict --deny '*' 2>/dev/null ); rc=$?
+  # HOME="$gh" (synthetic, only for grok) so grok cannot scan the real ~/.claude for CLAUDE.md /
+  # settings.json hooks / skills / plugins / ~/.claude.json MCP. The helper's own $HOME (auth
+  # copy + token sync-back below) stays REAL — HOME is overridden only on this grok line.
+  ( cd "$iso" && HOME="$gh" GROK_HOME="$gh" grok -p "$1" -m grok-4.5 --disable-web-search --sandbox strict --deny '*' 2>/dev/null ); rc=$?
   # Sync grok's refreshed token back IF it CHANGED (a refresh can succeed even if the turn later
   # errors) — else a discarded temp home rotates your subscription login OUT. Atomic; changed-only.
   [ -z "$XAI_API_KEY" ] && [ -s "$gh/auth.json" ] && [ "$(cksum < "$gh/auth.json" 2>/dev/null)" != "$seed" ] && \
-    cp "$gh/auth.json" "$HOME/.grok/.auth.relay.$$" && mv -f "$HOME/.grok/.auth.relay.$$" "$HOME/.grok/auth.json"
+    { stg="$(mktemp "$HOME/.grok/.auth.relay.XXXXXX" 2>/dev/null)" && cp "$gh/auth.json" "$stg" && mv -f "$stg" "$HOME/.grok/auth.json"; }
   exit "$rc"
 )
 ```
@@ -111,18 +115,39 @@ grok_media() (
      || git -C "$iso" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     echo "grok-relay: cannot isolate; refusing Grok" >&2; exit 1
   fi
-  printf '[features]\ntelemetry = false\n[telemetry]\ntrace_upload = false\n[harness]\ndisable_codebase_upload = true\n[compat.claude]\nskills = false\nrules = false\nmcps = false\n[compat.cursor]\nskills = false\nrules = false\nmcps = false\n' > "$gh/config.toml"
+  printf '[features]\ntelemetry = false\n[telemetry]\ntrace_upload = false\n[harness]\ndisable_codebase_upload = true\n[compat.claude]\nskills = false\nrules = false\nagents = false\nmcps = false\nhooks = false\nsessions = false\n[compat.cursor]\nskills = false\nrules = false\nagents = false\nmcps = false\nhooks = false\nsessions = false\n' > "$gh/config.toml"
   [ -n "$XAI_API_KEY" ] || { cp "$HOME/.grok/auth.json" "$gh/auth.json" 2>/dev/null; seed="$(cksum < "$gh/auth.json" 2>/dev/null)"; }
   # --tools keeps the 4 media tools; --disallowed-tools removes the always-on MCP meta-tools
   # (search_tool/use_tool) so media cannot reach an MCP server even if one is configured.
-  ( cd "$iso" && GROK_HOME="$gh" grok -p "$(cat "$1")" -m grok-4.5 --disable-web-search --sandbox strict \
+  # HOME="$gh" (synthetic, only for grok) — see grok_relay; keeps real ~/.claude out of the turn.
+  ( cd "$iso" && HOME="$gh" GROK_HOME="$gh" grok -p "$(cat "$1")" -m grok-4.5 --disable-web-search --sandbox strict \
       --tools image_gen,image_edit,image_to_video,reference_to_video --disallowed-tools search_tool,use_tool 2>/dev/null ); rc=$?
   [ -z "$XAI_API_KEY" ] && [ -s "$gh/auth.json" ] && [ "$(cksum < "$gh/auth.json" 2>/dev/null)" != "$seed" ] && \
-    cp "$gh/auth.json" "$HOME/.grok/.auth.relay.$$" && mv -f "$HOME/.grok/.auth.relay.$$" "$HOME/.grok/auth.json"
+    { stg="$(mktemp "$HOME/.grok/.auth.relay.XXXXXX" 2>/dev/null)" && cp "$gh/auth.json" "$stg" && mv -f "$stg" "$HOME/.grok/auth.json"; }
   # image_gen writes under the temp GROK_HOME (or iso dir) — move the artifact(s) out BEFORE cleanup.
-  # Count what actually MOVED (find -print), not the dest file count: mv overwrites a same-named
-  # file, so a dest-count delta would miss a real artifact that replaced an existing one.
-  moved=$(find "$gh" "$iso" -type f \( -name '*.png' -o -name '*.jpg' -o -name '*.jpeg' -o -name '*.webp' -o -name '*.mp4' \) -print -exec mv {} "$2"/ \; | wc -l)
+  # Count SUCCESSFUL moves (not files found): if a move fails (e.g. $2 unwritable), relocate that
+  # artifact to a durable recovery dir so the EXIT trap does not delete it with the temp home.
+  moved=0; failed=0; rec=""; keep=""
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    if mv "$f" "$2"/ 2>/dev/null; then moved=$((moved + 1)); continue; fi
+    failed=$((failed + 1))
+    [ -n "$rec" ] || rec="$(mktemp -d "${TMPDIR:-/tmp}/grok-media-recovered.XXXXXX" 2>/dev/null)"
+    # If the recovery dir couldn't be made (e.g. TMPDIR itself full/broken), leave the artifact in
+    # the temp home and set keep=1 so the EXIT trap does NOT delete it — never silently drop it.
+    if [ -n "$rec" ]; then mv "$f" "$rec"/ 2>/dev/null || keep=1; else keep=1; fi
+  done <<REC
+$(find "$gh" "$iso" -type f \( -name '*.png' -o -name '*.jpg' -o -name '*.jpeg' -o -name '*.webp' -o -name '*.mp4' \))
+REC
+  if [ "$failed" -gt 0 ]; then
+    if [ -n "$keep" ]; then
+      trap - EXIT INT TERM HUP   # keep the temp so the un-recoverable artifact survives
+      echo "grok_media: $failed artifact(s) could not be moved into $2 and recovery failed — left in $gh (which also holds a copied auth token; delete it after recovering)" >&2
+    else
+      echo "grok_media: $failed artifact(s) could not be moved into $2 — preserved in $rec" >&2
+    fi
+    exit 3
+  fi
   if [ "$rc" = 0 ] && [ "$moved" -eq 0 ]; then
     echo "grok_media: Grok returned success but produced no media artifact" >&2; exit 3
   fi
@@ -143,23 +168,29 @@ Why each part is load-bearing:
   defers the trap until grok exits, and `SIGKILL` skips it entirely — the mode-0700 temp home then
   lingers until grok ends or the OS tmp-reaper runs. The trap is scoped to the subshell, so it does
   not clobber the caller's own traps.
-- **Clean `GROK_HOME` + minimal safe config** (v2.0.3/2.0.4): without it, Grok loads your global
-  `~/.grok/AGENTS.md` (and rules / skills / MCP) into the model turn and sends it to xAI — verified
-  on grok 0.2.99 and 0.2.101. The helper points `GROK_HOME` at a throwaway temp dir seeded with
-  only `auth.json` (or nothing, under `XAI_API_KEY`) plus a **minimal config** that turns telemetry
-  / trace-upload / codebase-upload off and disables the Claude/Cursor rule scanners **and MCP
-  servers** (`[compat.*] mcps = false`) — so the clean home never falls back to less-safe grok
-  defaults. (Note: MCP servers are configured in `~/.claude.json` under `$HOME`, which the helper
-  does not relocate, so `mcps = false` is what actually keeps them out — verified: `grok inspect`
-  shows them `[disabled]`.)
-- **Token sync-back on CHANGE (v2.0.4)**: the subscription path copies your OAuth token in; Grok
-  refreshes it during the call. A discarded temp home would *lose* that refresh, and since xAI
+- **Clean `GROK_HOME` + synthetic `HOME` + minimal safe config** (v2.0.3–2.0.5): without them, Grok
+  loads your global `~/.grok/AGENTS.md` **and** — because its Claude/Cursor compat scanners default
+  ON — your `~/.claude/CLAUDE.md`, `~/.claude/settings.json` hooks, `~/.claude/skills`, plugins, and
+  `~/.claude.json` MCP servers into the model turn, sending them to xAI (verified on grok 0.2.99 /
+  0.2.101 via `grok inspect` with canary files). Two layers stop this: (1) **`GROK_HOME` → a
+  throwaway temp** with a **minimal config** that turns telemetry / trace-upload / codebase-upload
+  off and sets `[compat.claude]`/`[compat.cursor]` `skills`/`rules`/`agents`/`mcps`/`hooks`/`sessions
+  = false`; and (2, v2.0.5) **`HOME` → that same temp for the grok process only**, so Grok has no
+  real `~/.claude` / `~/.claude.json` to scan at all — the load-bearing fix, since those live under
+  `$HOME`, not `GROK_HOME` (verified: with a synthetic `HOME`, `grok inspect` shows Project
+  Instructions / MCP / Hooks all `0`). `HOME` is overridden only on the grok line, so the helper's
+  own auth copy and token sync-back still use your real `~/.grok`.
+- **Token sync-back on CHANGE (v2.0.4/2.0.5)**: the subscription path copies your OAuth token in;
+  Grok refreshes it during the call. A discarded temp home would *lose* that refresh, and since xAI
   rotates refresh tokens, repeated relays would rotate your real `~/.grok` login OUT. So the helper
   copies the token back to `~/.grok/auth.json` **whenever it changed** (`cksum` differs) — not only
   when the turn exited 0, because a refresh can succeed even if the *inference* step later errors
-  (v2.0.3 gated on exit 0 and could still rotate you out on that path). Atomic (`.auth.relay.$$` →
-  `mv -f`), changed-and-non-empty only. **Set `XAI_API_KEY` to skip the token copy and sync-back
-  entirely** — no auth file is written (the API key routes via `api.x.ai`, metered).
+  (v2.0.3 gated on exit 0 and could still rotate you out on that path). The staging file is
+  **`mktemp`-unique** (v2.0.5), not `.auth.relay.$$` — two relays launched from the same shell share
+  `$$` and would otherwise collide on the staging path. Atomic (`mktemp` → `mv -f`),
+  changed-and-non-empty only. Two truly-concurrent relays still race last-writer-wins on
+  `~/.grok/auth.json` (both write a valid token); for strict concurrency serialize the Grok lane or
+  use `XAI_API_KEY`. **Set `XAI_API_KEY` to skip the token copy and sync-back entirely.**
 - **`--deny '*'` (text)** genuinely refuses every tool — verified on 0.2.99/0.2.101 by forcing a
   tool call: the run logs `Denied by permission policy: deny rule on any tool matching "*"`. This
   closes the "second exposure" (an agentic Grok reading elsewhere via

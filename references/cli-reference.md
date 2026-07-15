@@ -280,10 +280,10 @@ if [ -z "$gh" ] || [ -z "$iso" ] || ! command -v git >/dev/null 2>&1 || git -C "
   echo "grok-relay: cannot isolate; refusing to run Grok" >&2
 else
   [ -n "$XAI_API_KEY" ] || { cp "$HOME/.grok/auth.json" "$gh/auth.json" 2>/dev/null; seed="$(cksum < "$gh/auth.json" 2>/dev/null)"; }
-  ( cd "$iso" && GROK_HOME="$gh" grok -p "…" -m grok-4.5 --disable-web-search --sandbox strict --deny '*' 2>/dev/null ); rc=$?
+  ( cd "$iso" && HOME="$gh" GROK_HOME="$gh" grok -p "…" -m grok-4.5 --disable-web-search --sandbox strict --deny '*' 2>/dev/null ); rc=$?
   # Sync grok's refreshed token back IF it CHANGED (a refresh can succeed even if the turn later
   # errors) — else a discarded temp home rotates your real ~/.grok login out. Changed + non-empty.
-  [ -z "$XAI_API_KEY" ] && [ -s "$gh/auth.json" ] && [ "$(cksum < "$gh/auth.json" 2>/dev/null)" != "$seed" ] && cp "$gh/auth.json" "$HOME/.grok/.auth.relay.$$" && mv -f "$HOME/.grok/.auth.relay.$$" "$HOME/.grok/auth.json"
+  [ -z "$XAI_API_KEY" ] && [ -s "$gh/auth.json" ] && [ "$(cksum < "$gh/auth.json" 2>/dev/null)" != "$seed" ] && { stg="$(mktemp "$HOME/.grok/.auth.relay.XXXXXX" 2>/dev/null)" && cp "$gh/auth.json" "$stg" && mv -f "$stg" "$HOME/.grok/auth.json"; }
 fi
 rm -rf "$iso" "$gh"
 ```
@@ -304,15 +304,17 @@ below; verify per version:
   local protection. The skill only READS user config; it never writes it.
 - The official `[tools] respect_gitignore=true` limits search/read tools only; it does **not** stop
   the whole-repo bundle.
-- **Global-rule leak — clean `GROK_HOME` (v2.0.3/2.0.4).** By default Grok loads your global
-  `~/.grok/AGENTS.md` / rules / skills into every model turn and sends them to xAI (verified
+- **Global-rule leak — clean `GROK_HOME` + synthetic `HOME` (v2.0.3–2.0.5).** By default Grok loads
+  your global `~/.grok/AGENTS.md` AND (via Claude/Cursor compat scanners, all default ON) your
+  `~/.claude/CLAUDE.md` / hooks / skills / `~/.claude.json` MCP into every model turn (verified
   on 0.2.99/0.2.101; §4a of [../SECURITY.md](../SECURITY.md)). The `grok_relay` / `grok_media` helpers
-  point `GROK_HOME` at a throwaway temp dir seeded with only auth plus a minimal config that also
-  sets `[compat.*] mcps = false` — MCP servers live in `~/.claude.json` under `$HOME` (which the
-  helper does not relocate), so `mcps = false` is what actually keeps them out (`grok inspect` shows
-  them `[disabled]`). They copy Grok's refreshed token back to `~/.grok/auth.json` **on change**
-  (else the discarded temp home would rotate your subscription login out over repeated relays);
-  `XAI_API_KEY` skips the copy. Because the home is clean, your `config.toml` kill-switches above do **not** apply to a relay
+  point `GROK_HOME` **and `HOME`** at a throwaway temp seeded with only auth plus a minimal config
+  that sets every `[compat.*]` cell `= false`. The synthetic `HOME` is load-bearing: `~/.claude*`
+  lives under `$HOME`, not `GROK_HOME`, so relocating `HOME` is what removes it (`grok inspect` then
+  shows Project Instructions / MCP / Hooks = `0`). They copy Grok's refreshed token back to the real
+  `~/.grok/auth.json` **on change** via an `mktemp`-unique staging file (else the discarded temp home
+  would rotate your subscription login out over repeated relays; `.auth.relay.$$` could collide for
+  same-shell parallel calls); `XAI_API_KEY` skips the copy. Because the home is clean, your `config.toml` kill-switches above do **not** apply to a relay
   call — it relies on isolation + clean home + deny, not those flags.
 - **Second exposure — Grok's own tools** — baked into the helpers since v2.0.2/v2.0.3: text relays
   carry `--deny '*'` (verified on 0.2.99 by forcing a tool call → `Denied by permission policy`)
@@ -364,7 +366,7 @@ if [ -z "$GROK_HOME_TMP" ] || [ -z "$GROK_ISO" ] || ! command -v git >/dev/null 
   echo "grok-relay: cannot isolate; refusing Grok" >&2
 else
   [ -n "$XAI_API_KEY" ] || cp "$HOME/.grok/auth.json" "$GROK_HOME_TMP/auth.json" 2>/dev/null
-  ( cd "$GROK_ISO" && GROK_HOME="$GROK_HOME_TMP" RUST_LOG=debug grok -p "test" -m grok-4.5 --disable-web-search --sandbox strict --deny '*' 2>/tmp/grok-debug.log ) &
+  ( cd "$GROK_ISO" && HOME="$GROK_HOME_TMP" GROK_HOME="$GROK_HOME_TMP" RUST_LOG=debug grok -p "test" -m grok-4.5 --disable-web-search --sandbox strict --deny '*' 2>/tmp/grok-debug.log ) &
   GROK_PID=$!; sleep 75; grep -c errorcode_502 /tmp/grok-debug.log; kill "$GROK_PID" 2>/dev/null
   # No token sync-back here: this call is deliberately KILLED, so the temp token state is
   # indeterminate — do not copy it back. This one-off diagnostic may rotate your token once; if it
@@ -448,10 +450,10 @@ Walk this ladder in order and stop at the first verdict:
      echo "grok-relay: cannot isolate; refusing Grok" >&2
    else
      [ -n "$XAI_API_KEY" ] || { cp "$HOME/.grok/auth.json" "$GROK_HOME_TMP/auth.json" 2>/dev/null; seed="$(cksum < "$GROK_HOME_TMP/auth.json" 2>/dev/null)"; }
-     ( cd "$GROK_ISO" && GROK_HOME="$GROK_HOME_TMP" perl -e 'alarm shift; exec @ARGV' 120 \
+     ( cd "$GROK_ISO" && HOME="$GROK_HOME_TMP" GROK_HOME="$GROK_HOME_TMP" perl -e 'alarm shift; exec @ARGV' 120 \
          grok -p "Reply with exactly GROK_OK and nothing else." -m grok-4.5 --disable-web-search --sandbox strict --deny '*' ); rc=$?
      # sync refreshed token back on CHANGE (see grok_relay): a temp GROK_HOME would else rotate your login out
-     [ -z "$XAI_API_KEY" ] && [ -s "$GROK_HOME_TMP/auth.json" ] && [ "$(cksum < "$GROK_HOME_TMP/auth.json" 2>/dev/null)" != "$seed" ] && cp "$GROK_HOME_TMP/auth.json" "$HOME/.grok/.auth.relay.$$" && mv -f "$HOME/.grok/.auth.relay.$$" "$HOME/.grok/auth.json"
+     [ -z "$XAI_API_KEY" ] && [ -s "$GROK_HOME_TMP/auth.json" ] && [ "$(cksum < "$GROK_HOME_TMP/auth.json" 2>/dev/null)" != "$seed" ] && { stg="$(mktemp "$HOME/.grok/.auth.relay.XXXXXX" 2>/dev/null)" && cp "$GROK_HOME_TMP/auth.json" "$stg" && mv -f "$stg" "$HOME/.grok/auth.json"; }
    fi
    [ -n "$GROK_ISO" ] && rm -rf "$GROK_ISO" "$GROK_HOME_TMP"
    ```

@@ -7,9 +7,10 @@ actually reads. This is confirmed by xAI's own account and by independent wire c
 **v2.0.0**, headless-relay runs every Grok call **fail-closed**: isolated in an empty, non-git
 temporary directory, never in your repository, and it refuses rather than risk a leak. From
 **v2.0.3** every Grok call goes through two helper functions (`grok_relay` / `grok_media`) that add
-two more layers: a **clean, temporary `GROK_HOME`** so Grok cannot load your global
-`~/.grok/AGENTS.md`, rules, skills, or MCP servers into the model turn (a real egress, verified on
-0.2.99 — see §4a), and **tool restriction** (`--deny '*'` for text; a `--tools` allow-list of only
+more layers: a **clean, temporary `GROK_HOME`** and (v2.0.5) a **synthetic `HOME`** so Grok cannot
+load your global `~/.grok/AGENTS.md` OR your `~/.claude/CLAUDE.md` / hooks / skills / `~/.claude.json`
+MCP into the model turn (real egress paths, verified on 0.2.99 / 0.2.101 — see §4a), and **tool
+restriction** (`--deny '*'` for text; a `--tools` allow-list of only
 the four media tools for media) plus a best-effort `--sandbox strict`. These narrow the exposure to the prompt itself; they
 do **not** make Grok local — it is still a cloud model, and what you put in the prompt still goes
 to xAI. Repo- and diff-context work is routed to Codex, Gemini, GLM, or Claude, which a wire-test
@@ -133,12 +134,17 @@ transcripts ran ~5 KB larger than a clean-`GROK_HOME` run (consistent with the f
 file), while a clean `GROK_HOME` dropped this to 0 of 3. Grok's own doc (`12-project-rules.md`)
 states global rules from `~/.grok/` apply to all projects. `--system-prompt-override` did **not** suppress it (the rules load
 as a separate context block). Running with a **clean, temporary `GROK_HOME`** (seeded only with
-auth) removed it entirely — verified: the `AGENTS.md` content no longer appeared and auth still
-worked. (MCP servers are a separate matter: they load from `~/.claude.json` under `$HOME`, which
-`GROK_HOME` does not relocate, so v2.0.4 also sets `[compat.*] mcps = false` in the clean home's
-config to disable them — `grok inspect` then shows them `[disabled]`.) This is why every call
-routes through a clean `GROK_HOME` (§5). Catalog fetches (`grok models`) send no model turn, so
-they do not leak this way.
+auth) removed the `~/.grok/AGENTS.md` content entirely. **But a related class loads from `$HOME`,
+not `GROK_HOME`:** Grok's Claude/Cursor compat scanners (every `[compat.*]` cell defaults ON) read
+`~/.claude/CLAUDE.md` (`agents`), `~/.claude/settings.json` hooks (`hooks`), `~/.claude/skills`
+(`skills`), and `~/.claude.json` MCP servers (`mcps`) — and `GROK_HOME` does not relocate `$HOME`.
+Verified on 0.2.99/0.2.101 with canary files: with the v2.0.4 config (which set only
+`skills`/`rules`/`mcps = false`), a canary `~/.claude/CLAUDE.md` still showed as an **active**
+"Project Instruction" (because `agents` stayed ON). v2.0.5 closes this two ways: it sets **every**
+`[compat.*]` cell `= false`, and — the load-bearing fix — points **`HOME` at the clean temp for the
+grok process**, so there is no real `~/.claude` to scan at all (`grok inspect` then reports Project
+Instructions / MCP / Hooks = `0`). This is why every call routes through a clean `GROK_HOME` +
+synthetic `HOME` (§5). Catalog fetches (`grok models`) send no model turn, so they do not leak.
 
 **Re-confirmed on grok 0.2.101 (2026-07-14/15):** after the CLI self-updated from 0.2.99 to 0.2.101,
 every behavior reproduced identically — the default leak persists, the clean `GROK_HOME` stops it,
@@ -156,11 +162,12 @@ is routed to them rather than to Grok.
 
 ---
 
-## 5. What headless-relay does about it (v2.0.0 → v2.0.4)
+## 5. What headless-relay does about it (v2.0.0 → v2.0.5)
 
 From v2.0.3 every Grok call goes through one of two helper functions (`grok_relay` for text,
-`grok_media` for image/video) defined in SKILL.md; v2.0.4 hardens their auth, cleanup, and media
-tool restriction. Each layer below is applied by the helper:
+`grok_media` for image/video) defined in SKILL.md; v2.0.4 hardened their auth/cleanup/media tool
+restriction, and v2.0.5 adds a synthetic `HOME` (closing the `~/.claude` leak v2.0.4 missed) plus
+`mktemp`-unique token staging. Each layer below is applied by the helper:
 
 - **Fail-closed isolation.** Every Grok call runs in a fresh, empty, non-git temporary directory.
   No repository in the working directory means no git repository to bundle. If isolation cannot be
@@ -169,22 +176,30 @@ tool restriction. Each layer below is applied by the helper:
   `TMPDIR` out of your repositories; on a normal machine `mktemp` uses `/tmp` or `/var/folders`.
 - **Subshell body + signal trap (v2.0.4).** Each helper is `name() ( … )` with
   `trap 'rm -rf …' EXIT INT TERM HUP`, so the temp home (and the copied token in it) is removed on
-  every exit path including a kill signal — no lingering token copy after an interrupted call.
-- **Clean `GROK_HOME` + minimal safe config (v2.0.3/2.0.4) — the global-rule leak.** By default
-  Grok loads your global `~/.grok/AGENTS.md`, rules, skills, and MCP servers into every model turn
-  and sends them to xAI (§4a). The helper points `GROK_HOME` at a throwaway temp dir seeded with
-  only auth (a copied token, or `XAI_API_KEY`) plus a **minimal config** that turns telemetry /
-  trace-upload / codebase-upload off and disables the Claude/Cursor rule scanners **and MCP
-  servers** (`[compat.*] mcps = false`) — so the clean home never falls back to less-safe grok
-  defaults. Verified on 0.2.99 and 0.2.101; with `mcps = false`, `grok inspect` shows the machine's
-  MCP servers `[disabled]`. This is the layer that makes the "isolated" call actually free of your
-  machine's global context.
-- **Token sync-back on change (v2.0.4).** Grok refreshes the token during the call and xAI rotates
-  refresh tokens, so a temp home that discarded the refresh would rotate your real `~/.grok` login
-  OUT over repeated relays. The helper copies the refreshed token back to `~/.grok/auth.json`
+  normal exit and on the interactive/group-signal path (Ctrl-C, or a `timeout` that kills grok). If
+  only the helper's own PID is signalled while grok is mid-call the trap defers until grok exits, and
+  `SIGKILL` skips it — the mode-0700 temp then lingers until grok ends or the OS tmp-reaper runs.
+- **Clean `GROK_HOME` + synthetic `HOME` + minimal config (v2.0.3–2.0.5) — the global-rule leak.**
+  By default Grok loads your global `~/.grok/AGENTS.md` **and**, via its Claude/Cursor compat
+  scanners (default ON), your `~/.claude/CLAUDE.md`, `~/.claude/settings.json` hooks, skills,
+  plugins, and `~/.claude.json` MCP servers into every model turn and sends them to xAI (§4a). The
+  helper (1) points `GROK_HOME` at a throwaway temp seeded with only auth plus a **minimal config**
+  that turns telemetry / trace-upload / codebase-upload off and sets **every** `[compat.*]` cell
+  (`skills`/`rules`/`agents`/`mcps`/`hooks`/`sessions`) `= false`; and (2, v2.0.5) points **`HOME` at
+  that temp for the grok process only** — the load-bearing fix, because the `~/.claude*` assets live
+  under `$HOME`, not `GROK_HOME`. Verified on 0.2.99 / 0.2.101: with a synthetic `HOME`, `grok
+  inspect` reports Project Instructions / MCP / Hooks all `0`. `HOME` is overridden only on the grok
+  line, so the helper's own auth copy + token sync-back keep using your real `~/.grok`.
+- **Token sync-back on change (v2.0.4/2.0.5).** Grok refreshes the token during the call and xAI
+  rotates refresh tokens, so a temp home that discarded the refresh would rotate your real `~/.grok`
+  login OUT over repeated relays. The helper copies the refreshed token back to `~/.grok/auth.json`
   **whenever it changed** (`cksum` differs), not only on a zero exit — because a refresh can succeed
-  even if the inference step later errors (v2.0.3 gated on exit 0 and could still rotate you out on
-  that path). Atomic; changed-and-non-empty only. Set `XAI_API_KEY` to avoid the token copy entirely.
+  even if the inference step later errors (v2.0.3 gated on exit 0 and could still rotate you out).
+  The staging file is **`mktemp`-unique** (v2.0.5), not `.auth.relay.$$` — two relays from the same
+  shell share `$$` and would otherwise collide on staging. Atomic (`mktemp` → `mv -f`), changed +
+  non-empty only. (Two truly-concurrent relays still race last-writer-wins on `~/.grok/auth.json`,
+  both valid tokens; serialize the lane or use `XAI_API_KEY` for strict concurrency.) Set
+  `XAI_API_KEY` to avoid the token copy entirely.
 - **Tool restriction — the "second exposure".** An agentic Grok run could otherwise read elsewhere
   on the machine via its `run_terminal_command` / `read_file` / MCP tools and send that as model
   context. `grok_relay` denies all of them with `--deny '*'`; verified on 0.2.99/0.2.101 by forcing
@@ -267,13 +282,16 @@ what is only community-reported; verify for your version.
 - **`[tools] respect_gitignore = true`** (official) limits search/read tools only; it does **not**
   stop the whole-repo bundle.
 - **Clean `GROK_HOME` for the global-rule leak** — the `grok_relay` / `grok_media` helpers (v2.0.3,
-  §5) point `GROK_HOME` at a throwaway temp dir seeded with only auth, so Grok cannot load your
-  global `~/.grok/AGENTS.md` / rules / skills / MCP into the model turn (§4a). If you write your own
-  Grok invocation, do the same: `GROK_HOME="$(mktemp -d)"` with `auth.json` copied in (or
-  `XAI_API_KEY` set) — AND copy the refreshed `auth.json` back to `~/.grok/` afterward, or repeated
-  runs will rotate your subscription login out (xAI rotates refresh tokens; a discarded temp home
-  loses the refresh). Note this also means your `config.toml` kill-switches above do **not** apply
-  to such a call — a relay relies on isolation + deny + clean home, not on those flags.
+  §5) point `GROK_HOME` **and (v2.0.5) `HOME`** at a throwaway temp dir seeded with only auth + a
+  minimal config with every `[compat.*]` cell `= false`, so Grok cannot load your global
+  `~/.grok/AGENTS.md` OR your `~/.claude/CLAUDE.md` / hooks / skills / `~/.claude.json` MCP into the
+  model turn (§4a). If you write your own invocation, do the same: `HOME="$t" GROK_HOME="$t" grok …`
+  with `auth.json` copied into `$t` (or `XAI_API_KEY` set) — AND copy the refreshed `auth.json` back
+  to your REAL `~/.grok/` afterward (with the env-prefix form above, `$HOME` reverts to real after
+  the command; if you instead export `HOME=$t` helper-wide, save the real-home path first), or
+  repeated runs rotate your subscription login out. Note the clean home also means your real
+  `config.toml` kill-switches above do **not** apply to such a call — a relay relies on isolation +
+  synthetic home + deny, not on those flags.
 - **Sandbox + tool restriction for the "second exposure"** — baked into the helpers since
   v2.0.2–v2.0.4 (see §5). If you write your own invocation, mirror it: `--deny '*'` for a text relay
   (verified on 0.2.99/0.2.101 to refuse a forced tool call); for media, a `--tools` allow-list of

@@ -22,8 +22,9 @@ is a single `git clone`; everything else on this page is detail for when you nee
 > read files. As of v2.0.0 this skill runs every Grok call **fail-closed**: isolated in an empty
 > non-git directory, never in your repo, and it refuses rather than risk leaking. As of **v2.0.3**
 > every Grok call goes through two helper functions that add a clean, temporary `GROK_HOME` (so
-> Grok can't load your global `~/.grok/AGENTS.md` / rules / MCP into the model turn — a real egress,
-> verified on grok 0.2.99 and 0.2.101) and deny Grok's own tools (`--deny '*'`), plus a best-effort sandbox. These
+> Grok can't load your global `~/.grok/AGENTS.md` — nor (v2.0.5, via a synthetic `HOME`) your
+> `~/.claude/CLAUDE.md` / hooks / skills / MCP — into the model turn (real egress paths, verified on
+> grok 0.2.99/0.2.101) and deny Grok's own tools (`--deny '*'`), plus a best-effort sandbox. These
 > narrow the exposure to the prompt itself — they do **not** make Grok local; it is still a cloud
 > model. (The isolation stops the bundle because a git bundle can only come from a git repo; we
 > could not measure that directly while xAI server-disables the feature, so SECURITY.md states it

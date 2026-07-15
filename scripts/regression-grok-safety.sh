@@ -17,7 +17,7 @@
 #        - every raw call (relay OR `grok models`/`grok agent`) needs the isolation guards
 #          (`rev-parse --is-inside-work-tree` and `command -v git`), counted per call;
 #        - every raw RELAY call (grok -p / --single / --prompt-file / --prompt-json / --check /
-#          --resume / --continue / -r / -c) additionally needs `GROK_HOME`, `--sandbox strict`,
+#          --resume / --continue / -r / -c) additionally needs `GROK_HOME`, a synthetic `HOME` (v2.0.5), `--sandbox strict`,
 #          and a tool restriction (`--deny` OR a `--tools` allow-list), counted per call.
 # Counting is per-block and layer-independent (a flag may sit on a line-continuation), so a raw call
 # that drops GROK_HOME, the sandbox, the deny, or a guard trips the count. Comment-only lines are
@@ -83,6 +83,9 @@ for f in "SKILL.md" "references/cli-reference.md"; do
         # like $GROK_HOME_TMP — else a block that names its var GROK_HOME_TMP inflates the count and
         # the check goes dead. (GROK_HOME_TMP= does not match GROK_HOME= : the char after E is "_".)
         t5 = code; nhome  = gsub(/GROK_HOME=/, "&", t5)
+        # Synthetic HOME assignment on the grok line (v2.0.5) — " HOME=" with a leading space so it
+        # does NOT match "GROK_HOME=" (preceded by "_"). Blocks Grok scanning the real ~/.claude.
+        th = code; nhomeenv = gsub(/ HOME=/, "&", th)
         t6 = code; nsand  = gsub(/--sandbox strict/, "&", t6)
         # Tool restriction = a --deny rule (text: --deny '*') OR a --tools allow-list (media). Either
         # satisfies "the relay call restricts tools". Count both.
@@ -95,6 +98,9 @@ for f in "SKILL.md" "references/cli-reference.md"; do
         }
         if (nrelay > 0 && nhome < nrelay) {
           printf "FAIL: %d raw Grok relay call(s) but only %d clean-GROK_HOME(s) in %s (block near line %d)\n", nrelay, nhome, F, start; rc = 1
+        }
+        if (nrelay > 0 && nhomeenv < nrelay) {
+          printf "FAIL: %d raw Grok relay call(s) but only %d synthetic-HOME(s) in %s (block near line %d)\n", nrelay, nhomeenv, F, start; rc = 1
         }
         if (nrelay > 0 && nsand < nrelay) {
           printf "FAIL: %d raw Grok relay call(s) but only %d with --sandbox strict in %s (block near line %d)\n", nrelay, nsand, F, start; rc = 1
