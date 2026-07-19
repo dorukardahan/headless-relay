@@ -2,14 +2,14 @@
 
 headless-relay is an [Agent Skill](https://agentskills.io) that lets your coding agent use
 the other AI models installed on your machine, without you leaving the session. You say
-"ask Codex what it thinks of this function", "get a second opinion on this bug from GLM and
-Grok", or "have Gemini generate an image for this post". Your agent quietly runs the right
+"ask Codex what it thinks of this function", "get a second opinion on this bug from Kimi and
+GLM", or "have Gemini generate an image for this post". Your agent quietly runs the right
 tool in the background, reads the answer, and reports back to you. No new accounts, no API
 juggling: it drives the AI tools you already have, with the logins you already use.
 
 It works in any coding agent that reads Agent Skills and can run shell commands: Claude
-Code, OpenAI Codex CLI, xAI Grok, Cursor, OpenClaw, Nous Research Hermes and friends. Five
-model lanes ship ready to use (GPT, GLM, Grok, Gemini, Claude), and you can plug in your
+Code, OpenAI Codex CLI, xAI Grok, Cursor, OpenClaw, Nous Research Hermes and friends.
+Six model lanes ship ready to use (GPT, GLM, Kimi K3, Grok, Gemini, Claude), and you can plug in your
 own, including local models running through Ollama, LM Studio, or Apple MLX. Installation
 is a single `git clone`; everything else on this page is detail for when you need it.
 
@@ -36,7 +36,7 @@ is a single `git clone`; everything else on this page is detail for when you nee
 ## What it can do
 
 - **Second opinions**: hand a diff, a bug, a PR review, or a design question to GPT, GLM,
-  Grok, Gemini, or Claude
+  Kimi K3, Grok, Gemini, or Claude
 - **Consensus**: send the same prompt to several models in parallel and compare answers
 - **Image / video generation**: headless, through Codex or Gemini (no repo bundle) or Grok (isolated);
   Grok is the only lane that also does video. The skill documents each CLI's quirks
@@ -65,6 +65,7 @@ lives in `references/reprompter-relay.md`.
 | `references/custom-targets.md` | Connect your own targets (local models via Ollama/LM Studio/MLX, any one-shot CLI) through `~/.agents/relay-targets.json` |
 | `references/reprompter-relay.md` | Pairing recipe for [RePrompter](https://github.com/AytuncYildizli/reprompter): structure the prompt first, then relay it |
 | `scripts/regression-grok-safety.sh` | Deterministic guard that fails if the Grok isolation safeguard or its security anchors regress |
+| `scripts/regression-kimi-target.sh` | Deterministic guard for native Kimi OAuth/model routing and the fixed OpenCode GLM model |
 | `LICENSE.txt` | MIT license |
 
 ## Install
@@ -96,6 +97,8 @@ At least one target-model CLI installed and authenticated:
 - `codex` (OpenAI Codex CLI) with a ChatGPT plan or API key
 - `opencode` with a Z.ai Coding Plan credential, and/or the ZCode desktop app (its bundled
   `zcode` command works headlessly after a one-time setup, see `references/cli-reference.md`)
+- `kimi` (Kimi Code CLI) with its own Kimi Code device-code OAuth (`kimi login`). This login is
+  independent of OpenCode/Z.AI auth; the default relay model is Kimi K3 and can be overridden
 - `grok` (xAI Grok Build) with a SuperGrok login. Note: the skill runs Grok isolated (never in
   your repo) because Grok Build uploads the whole repo to xAI. See [SECURITY.md](SECURITY.md)
 - `agy` (Google Antigravity CLI, the Gemini CLI's replacement) with a Google login.
@@ -120,5 +123,6 @@ re-verified 2026-07-08 on grok 0.2.91 with grok-4.5, then 2026-07-13 on grok 0.2
 that day: the availability check was reworked because `grok models` can print "not authenticated"
 on a merely-expired cached token while still listing models in the same output; and a data-egress
 wire-test drove the v2.0.0 Grok isolation policy, see [SECURITY.md](SECURITY.md)); the Gemini
-lane was verified 2026-07-08 on Antigravity agy 1.1.0. CLIs drift fast, so re-verify flags when
+lane was verified 2026-07-08 on Antigravity agy 1.1.0; the native Kimi lane was verified
+2026-07-19 on Kimi Code CLI 0.27.0. CLIs drift fast, so re-verify flags when
 something errors.

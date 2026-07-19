@@ -1,6 +1,6 @@
 # Custom targets
 
-The built-in lanes (GPT, GLM, Grok, Gemini, Claude) cover the major hosted
+The built-in lanes (GPT, GLM, Kimi K3, Grok, Gemini, Claude) cover the major hosted
 providers, but any model with a one-shot headless CLI can be a relay target:
 local models (Ollama, LM Studio, Apple MLX), regional providers, or an internal
 inference endpoint wrapped in a CLI.
