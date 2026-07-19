@@ -1,27 +1,67 @@
 ---
 name: headless-relay
-description: Headless handoff guide for running other AI models from inside an agent session (any Agent Skills runtime - Claude Code, Codex, Grok Build, Cursor, OpenClaw, Hermes). Covers GPT (codex exec), GLM (opencode run or zcode --prompt), Grok (grok -p), Gemini (Antigravity agy -p), and Claude (claude -p or a subagent) - inline vs file prompts, parallel multi-model consensus, JSON output, session resume, image/video generation, provider-terms compliance. Use for "ask codex", "ask GLM", "ask grok", "ask gemini", "second opinion", "cross-model review", "generate an image", "run headless", "ask another model".
+description: Headless handoff guide for running other AI models from inside an agent session (any Agent Skills runtime - Claude Code, Codex, Grok Build, Cursor, OpenClaw, Hermes). Covers GPT (codex exec), GLM (opencode run or zcode --prompt), Kimi K3 (native kimi -p), Grok (grok -p), Gemini (Antigravity agy -p), and Claude (claude -p or a subagent) - inline vs file prompts, parallel multi-model consensus, JSON output, session resume, image/video generation, provider-terms compliance. Use for "ask codex", "ask GLM", "ask Kimi", "ask grok", "ask gemini", "second opinion", "cross-model review", "generate an image", "run headless", "ask another model".
 license: MIT. Complete terms in LICENSE.txt
-metadata: {"version": "2.0.5"}
+metadata: {"version": "2.1.0"}
 ---
 
 # headless-relay
 
 This skill provides instructions for delegating a task to another AI model without leaving the
-current agent session. The user says "ask Codex", "get GLM's opinion", "run this by Grok"; the
+current agent session. The user says "ask Codex", "get GLM's opinion", "run this by Kimi"; the
 orchestrating agent (Claude Code, Codex CLI, or another harness) writes the prompt, runs the
 target model's headless CLI through its shell tool, reads the model's stdout, and summarizes
 the answer back. Follow these patterns exactly.
 
-## The five targets
+## The six targets
 
 | Target | CLI | Headless entry point | Auth / plan |
 |--------|-----|----------------------|-------------|
 | GPT | `codex` (OpenAI Codex CLI) | `codex exec` | ChatGPT plan or OpenAI API key (`codex login`) |
 | GLM | `opencode`, or `zcode` (ships inside the ZCode desktop app) | `opencode run` / `zcode --prompt` | Z.ai Coding Plan (API key or ZCode app login) |
+| Kimi K3 | `kimi` (Kimi Code CLI) | `kimi -p` | Kimi membership through native device-code OAuth (`kimi login`) |
 | Grok | `grok` (xAI Grok Build) | `grok -p` / `--single` — **⚠️ must run isolated, see the next section** | SuperGrok (`grok login`) |
 | Gemini | `agy` (Google Antigravity CLI — replaced the retired Gemini CLI) | `agy -p` / `--print` | Google account via the Antigravity app/CLI |
 | Claude | `claude` (Claude Code) | `claude -p`, or the harness's native subagent | Anthropic auth of the current session |
+
+## Kimi text relay — isolate the working directory
+
+Kimi print mode is agentic: it starts in the current directory, uses `auto` permissions, and
+cannot be combined with `--plan`. A text-only review therefore runs from a fresh empty non-git
+directory with an empty skills directory. This reduces accidental project access; it is neither
+full context isolation nor an OS sandbox. Kimi 0.27.0 still loads `$KIMI_CODE_HOME/AGENTS.md` and
+`~/.agents/AGENTS.md` from the user's real home; review those files before relay because their
+contents enter the model context. Give native Kimi a real repository cwd only for an explicitly
+requested agentic task.
+
+Define this helper once and use it for every text-only Kimi call. The helper shell leaves the
+real Kimi home untouched: it never reads, copies, moves, or rewrites Kimi's OAuth files. The
+first-party CLI itself necessarily reads and may refresh its own OAuth store. The helper also
+bounds Kimi's background-task wait, which can otherwise be effectively unbounded.
+
+```bash
+# Usage: kimi_relay PROMPT [NATIVE-MODEL-ALIAS] [text|stream-json]
+kimi_relay() (
+  [ "$#" -ge 1 ] && [ "$#" -le 3 ] || { echo "kimi-relay: usage: kimi_relay PROMPT [MODEL] [FORMAT]" >&2; exit 2; }
+  prompt="$1"; model="${2:-${HEADLESS_RELAY_KIMI_MODEL:-kimi-code/k3}}"; format="${3:-text}"
+  limit="${HEADLESS_RELAY_KIMI_TIMEOUT_SECONDS:-600}"
+  case "$format" in text|stream-json) ;; *) echo "kimi-relay: format must be text or stream-json" >&2; exit 2;; esac
+  case "$limit" in ''|*[!0-9]*) echo "kimi-relay: timeout must be a positive integer" >&2; exit 2;; esac
+  [ "$limit" -gt 0 ] || { echo "kimi-relay: timeout must be greater than zero" >&2; exit 2; }
+  iso="$(mktemp -d "${TMPDIR:-/tmp}/kimi-iso.XXXXXX" 2>/dev/null)" || { echo "kimi-relay: mktemp failed" >&2; exit 1; }
+  trap 'rm -rf "$iso" 2>/dev/null' EXIT INT TERM HUP
+  skills="$iso/skills"; mkdir "$skills" || exit 1
+  if ! command -v git >/dev/null 2>&1 || ! command -v perl >/dev/null 2>&1 \
+     || git -C "$iso" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    echo "kimi-relay: cannot verify an isolated non-git cwd or enforce timeout; refusing" >&2; exit 1
+  fi
+  ( cd "$iso" && perl -e 'alarm shift; exec @ARGV' "$limit" kimi --skills-dir "$skills" \
+      -m "$model" -p "$prompt" --output-format "$format" )
+)
+```
+
+Never invoke `kimi_relay` from cron, a scheduler, or an unattended batch. Native subscription
+OAuth is for direct user-triggered turns; use metered Kimi Platform credentials for automation.
 
 ## ⚠️ Grok uploads your whole repo — isolation is mandatory
 
@@ -234,6 +274,7 @@ substitute a different model to fill the gap.
 | GPT (Codex) | `command -v codex` | fails fast with an auth error when logged out (`codex login`) |
 | GLM via OpenCode | `command -v opencode` | `opencode auth list` shows a Z.AI credential |
 | GLM via ZCode | `command -v zcode` (add a PATH wrapper if only the app is installed) | `~/.zcode/cli/config.json` exists or `ZCODE_API_KEY` is set. `zcode login` is currently broken — see [references/cli-reference.md](references/cli-reference.md) |
+| Kimi K3 | `command -v kimi` | `kimi doctor` validates configuration but not OAuth. Let the requested call fail once if the session is absent, then ask the user to run `kimi login`; never inspect or copy Kimi's token files |
 | Grok | `command -v grok` | **First apply the Grok isolation rule above — never run any `grok` command in the caller's repo.** Availability: run `grok models` **from an isolated non-git dir too**, with the same fail-closed guard (`GI="$(mktemp -d "${TMPDIR:-/tmp}/grok-iso.XXXXXX")"; if [ -z "$GI" ] || ! command -v git >/dev/null 2>&1 || git -C "$GI" rev-parse --is-inside-work-tree >/dev/null 2>&1; then echo "grok-relay: cannot isolate; refusing" >&2; else ( cd "$GI" && grok models ); fi; [ -n "$GI" ] && rm -rf "$GI"`), bounded — it is a catalog fetch, but isolate it the same way so the rule has no exception. Grok is available if the output lists models (`Default model:` / `Available models:`), EVEN IF a "You are not authenticated." line appears above the list — that header just mirrors an expired cached token that the same call silently refreshes before fetching the catalog. Only "not authenticated" with NO model list is a real problem: auth.json missing → logged out; auth.json present → confirm with one bounded real call (isolated — it is a real `grok -p`). Walk the availability ladder in [references/cli-reference.md](references/cli-reference.md) |
 | Gemini via Antigravity | `command -v agy` | `agy models` lists the model menu when logged in; the default model comes from the user's Antigravity config |
 | Claude | in-session already (native subagent); `command -v claude` only for headless | current session auth |
@@ -248,6 +289,13 @@ Rules:
   terminal agent) or the ZCode desktop app's bundled `zcode` command. `zcode` ships INSIDE the
   app; there is no separately installable ZCode CLI, and the npm packages named `zcode` /
   `zcode-cli` are unrelated third-party stubs — never install them.
+- **Kimi OAuth and OpenCode/Z.AI auth are separate credential stores.** `kimi login` signs the
+  native Kimi CLI into a Kimi account; `opencode auth login` manages OpenCode providers for the
+  GLM lane. Never copy tokens between them, and never log out of one CLI to switch the other.
+- Kimi defaults to the native alias `kimi-code/k3`. Treat an explicit "K3" / "Kimi K3" request as
+  that exact alias. If the user names a different native Kimi alias, pass it verbatim; with no
+  model named, honor `HEADLESS_RELAY_KIMI_MODEL` when set, then fall back to `kimi-code/k3`.
+  This override never changes GLM: OpenCode stays pinned to `zai-coding-plan/glm-5.2`.
 
 ## Custom targets
 
@@ -296,6 +344,7 @@ harness (Codex, OpenClaw, Hermes) is exactly the trigger.
 | Grok | xAI Acceptable Use Policy + Enterprise ToS prohibit using the Service or Output to develop competing models, and ban scraping, reselling, or distilling Output. |
 | Gemini (Antigravity) | Gemini API Additional Terms (updated March 2026) prohibit using the Services to develop models that compete with them, and ban reverse engineering / extracting / replicating components including model weights. Note the agy model menu also serves Claude and GPT-OSS models under Google's platform terms. |
 | GLM | Coding Plan is limited to officially supported tools — Claude Code, OpenCode, OpenClaw, and Hermes Agent are all on the current list. Open-weight (MIT), no sharp competing-model clause, but quota / fair-use enforcement is aggressive. |
+| Kimi K3 | Kimi Code explicitly supports Kimi CLI, OpenCode, OpenClaw, and other agent frameworks, but subscription use must remain personal and interactive. Conservatively limit this lane to user-triggered relays; cron jobs, batch/data-annotation pipelines, account/API resale, reverse proxies, and client-identity spoofing are not allowed. Use the metered Kimi Platform for automation. |
 
 Two rules hold regardless of orchestrator. First, check the target provider's stance on
 subscription auth from non-native harnesses: Anthropic blocks foreign CLIENTS on subscription
@@ -308,11 +357,14 @@ Hermes models is therefore barred from the Claude AND Grok branches for that wor
 
 ## Copy-paste baseline commands
 
-For Codex, GLM, Gemini, and Claude these are minimal forms — the model reasons over the prompt
-text you give it. Codex's default sandbox is read-only with no network; GLM/Gemini/Claude run
-agentic but were wire-verified not to upload your repo. **Grok is the exception — it must run
-isolated (see the Grok section above) or it uploads your whole repo. Never present the Grok
-baseline as "read-only" or "local".**
+For Codex, GLM, Kimi, Gemini, and Claude these are minimal forms — the model reasons over the
+prompt text you give it. Codex's default sandbox is read-only with no network; GLM/Gemini/Claude
+were wire-verified not to upload a whole-repo bundle. Kimi was not part of that wire-test and its
+`-p` mode auto-handles regular tool permissions, so do not treat the minimal command as read-only.
+For text-only relay, run it outside the repository and pass the required context in the prompt.
+**Grok is the exception — it must run isolated (see the
+Grok section above) or it uploads your whole repo. Never present the Grok baseline as "read-only"
+or "local".**
 
 ```bash
 # GPT (Codex) — default sandbox is read-only, no network
@@ -323,6 +375,13 @@ echo "your question here" | opencode run -m "zai-coding-plan/glm-5.2" --variant 
 
 # GLM via the ZCode app's bundled CLI (one-time setup: references/cli-reference.md)
 zcode --prompt "your question here"
+
+# Kimi K3 via the native CLI and its own OAuth. Explicit K3 always selects the exact native alias.
+kimi_relay "your question here" "kimi-code/k3"
+
+# For a generic "ask Kimi" request with no model named, use the configured override:
+KIMI_MODEL="${HEADLESS_RELAY_KIMI_MODEL:-kimi-code/k3}"
+kimi_relay "your question here" "$KIMI_MODEL"
 
 # Grok — via the grok_relay helper (define it once, see the Grok section above). It is the ONLY
 #        lane that uploads your whole repo unless isolated; the helper isolates + denies tools +
@@ -366,6 +425,9 @@ cat /tmp/handoff.md | opencode run -m "zai-coding-plan/glm-5.2" --variant max
 # bytes verbatim; the file's backticks/$ are NOT re-interpreted by the shell)
 zcode --prompt "$(cat /tmp/handoff.md)"
 
+# Kimi: no stdin prompt mode — pass the file bytes to the isolated helper.
+kimi_relay "$(cat /tmp/handoff.md)" "$KIMI_MODEL"
+
 # Grok: pass the file's bytes as the inline arg via command substitution — the grok_relay helper
 # uses `grok -p`, so no file needs to be readable from the isolated CWD. "$(cat …)" is NOT
 # re-interpreted, so backticks/$ in the file are safe (same reason `gh --body-file` beats --body).
@@ -382,8 +444,8 @@ claude -p "$(cat /tmp/handoff.md)" --model fable
 
 ### Scenario A — quick one-off question to one model
 Use the inline baseline command above. Read the stdout, summarize. For Codex this is read-only
-with no network; for **Grok** use the isolated form — it is never "no network" and must not run
-in the caller's repo.
+with no network; Kimi is agentic and must not be described as read-only; for **Grok** use the
+isolated form — it is never "no network" and must not run in the caller's repo.
 
 ### Scenario B — long prompt (a diff, a file, a spec)
 1. Write the full context to `/tmp/handoff.md` (question at the top, then the code/diff).
@@ -395,8 +457,11 @@ Run 2+ models on the SAME prompt file at once (independent shell calls in one me
 run concurrently), then compare where they agree and diverge.
 
 ```bash
+KIMI_MODEL="${HEADLESS_RELAY_KIMI_MODEL:-kimi-code/k3}"
 codex exec < /tmp/handoff.md > /tmp/ans-gpt.md 2>/dev/null &
 cat /tmp/handoff.md | opencode run -m "zai-coding-plan/glm-5.2" --variant max > /tmp/ans-glm.md 2>/dev/null &
+# kimi_relay is isolated and defaults to a 600s wall-clock limit; preserve diagnostics separately.
+kimi_relay "$(cat /tmp/handoff.md)" "$KIMI_MODEL" > /tmp/ans-kimi.md 2>/tmp/ans-kimi.err &
 # Grok lane — the grok_relay helper already isolates + denies tools + uses a clean GROK_HOME:
 grok_relay "$(cat /tmp/handoff.md)" > /tmp/ans-grok.md 2>/dev/null &
 wait
@@ -442,6 +507,11 @@ whole-repo bundle in the wire-test. `--disable-web-search` does not change this:
 web-search tool, never data egress. If you want Grok's take on a diff, paste the diff text into
 an isolated text-only Grok call — do not point Grok at the repo.
 
+**Kimi `-p` is agentic and uses its `auto` permission policy.** It cannot be combined with
+`--plan`, so do not describe a native Kimi headless run as read-only. For a review, pass the diff
+or relevant file text in the prompt. Give Kimi a repository working directory only when the user
+explicitly wants an agentic repo task and the user's static Kimi permission rules are suitable.
+
 ### Scenario E — structured JSON output for scripting
 
 | CLI | Flag | Extract the answer |
@@ -449,6 +519,7 @@ an isolated text-only Grok call — do not point Grok at the repo.
 | Codex | `--json` (JSONL events) or `-o out.txt` (last message to file) | parse JSONL, or read `out.txt` |
 | OpenCode | `--format json` | `jq` over the raw event JSON |
 | ZCode | `--json` | `jq -r '.response'`; session id = `.sessionId`, token usage under `.usage` |
+| Kimi | helper arg `stream-json` | JSONL Assistant/Tool messages; capture and inspect the raw stream before selecting the final Assistant message |
 | Grok | `--output-format json` | `jq -r '.text // .result'` |
 | Antigravity | (none) | No JSON mode — stdout is plain text; capture and use it directly |
 | Claude | `--output-format json` | `jq -r '.result'`; session id = `.session_id`, cost = `.total_cost_usd` |
@@ -468,8 +539,11 @@ claude -p "now check the error paths" --resume "$sid"
 ```
 
 `codex exec resume --last`, `opencode run -c` (continue) or `-s <id>`, `grok -r [id]` /
-`grok -c`, `zcode --resume sess_<id>` / `zcode -c`, `agy -c` / `agy --conversation <id>` are
-the equivalents. See [references/cli-reference.md](references/cli-reference.md). **Grok caveat:**
+`grok -c`, `zcode --resume sess_<id>` / `zcode -c`, and `agy -c` / `agy --conversation <id>`
+are the equivalents. Kimi's `-c` / `-S <id>` resume flags are only for an explicitly approved
+agentic session from the same stable working directory; the fresh-directory `kimi_relay` helper
+is intentionally one-shot. See [references/cli-reference.md](references/cli-reference.md).
+**Grok caveat:**
 the `grok_relay` helper creates and destroys its temp dirs per call, so it cannot resume. Grok
 resume needs the SAME working dir AND `GROK_HOME` kept alive across turns — build a persistent
 pair by hand using the helper's exact shape (empty non-git CWD, clean `GROK_HOME` seeded with auth,
@@ -539,7 +613,7 @@ Per-target support (detail in [references/cli-reference.md](references/cli-refer
 | GPT (Codex) | YES — built-in `image_gen` via `codex exec`; avoid `ultra` (auto-delegation spiral, `max` works in ~55s), close stdin (`</dev/null`), direct "call the tool now" prompt (verified: blue-circle + green-square PNGs). No whole-repo bundle (still a cloud image API) |
 | Gemini (agy) | YES (image only) — native `generate_image`, no API key / no OpenRouter (Google login covers it), ~34s, writes to cwd (verified: orange-triangle JPG). Run SOLO — the agy parallel-burst hang applies. No native video tool. No whole-repo bundle (still a cloud image API) |
 | Grok | YES — `image_gen` / `image_edit` / `image_to_video` / `reference_to_video`, Imagine backend; the ONLY lane with video. **Must run via `grok_media`** (isolated + clean GROK_HOME; allow-lists ONLY the 4 media tools with `--tools` — `--deny '*'` would block image_gen — verified 0.2.101). image_gen saves under the temp GROK_HOME; the helper moves it to your output dir and errors if nothing was produced |
-| GLM / Claude | No headless image generation in these CLIs |
+| GLM / Kimi / Claude | No documented headless image/video generation in these CLIs (Kimi K3 can understand media, but CLI 0.27.0 exposes no headless generation tool) |
 
 ## Claude target: subprocess vs in-session subagent
 
@@ -559,14 +633,18 @@ while a same-provider second opinion should stay in-session as a subagent.
 
 1. The orchestrating agent does the work. The user only says "ask X" — the orchestrator
    prepares the prompt, picks inline vs file, runs the shell command(s), and reports the result.
-2. Default to the read-only baseline. Escalate to `workspace-write` + network (Codex) only when
-   the model genuinely must touch the repo — never silently.
+2. Default to the safest target-specific baseline. Codex is read-only/no-network by default;
+   Kimi `-p` is agentic, so pass review context as prompt text unless repo access was explicitly
+   requested. Escalate write/network capability only when genuinely needed — never silently.
 3. For multi-model runs, launch all commands in one message so they run concurrently, then
    `wait`.
 4. Never paste secrets into a prompt file or command. Reference config by name only.
 5. Report faithfully: if a model errored or timed out, say so with its stderr — do not fabricate
    an answer.
-6. **Grok is fail-closed.** Never run `grok` from the caller's repo, `$HOME`, or any dir with
+6. Keep the Kimi subscription lane user-triggered and interactive. Do not put native OAuth-backed
+   `kimi -p` calls into cron, unattended batch, data annotation, or an always-on service; use the
+   metered Kimi Platform for automation.
+7. **Grok is fail-closed.** Never run `grok` from the caller's repo, `$HOME`, or any dir with
    real data — it uploads the whole repo + git history to xAI (see the Grok section). Run every
    Grok call in a fresh non-git temp dir, context via prompt only; if that can't be guaranteed,
    don't run Grok — warn the user and use Codex / Gemini / GLM / Claude, which sent no whole-repo
@@ -577,8 +655,8 @@ while a same-provider second opinion should stay in-session as a subagent.
 | File | Contents |
 |------|----------|
 | [SECURITY.md](SECURITY.md) | **Grok whole-repo upload**: the threat, primary sources, xAI's response, the 2026-07-13 wire-test, and per-user hardening / migration for people who already ran Grok |
-| [references/cli-reference.md](references/cli-reference.md) | Full per-CLI flag tables, model ids, ZCode setup recipes, output-format shapes, session resume, sandbox/network detail, the Grok data-egress + isolation detail, troubleshooting |
-| [references/anthropic-terms.md](references/anthropic-terms.md) | Compliance detail: Anthropic subscription-routing block, Commercial Terms D.4, Fable 5 safeguards, enforcement history, plus the OpenAI / xAI / Z.ai / Google provider-terms matrix, with citations |
+| [references/cli-reference.md](references/cli-reference.md) | Full per-CLI flag tables, Kimi OAuth/model selection, ZCode setup recipes, output-format shapes, session resume, sandbox/network detail, the Grok data-egress + isolation detail, troubleshooting |
+| [references/anthropic-terms.md](references/anthropic-terms.md) | Compliance detail: Anthropic subscription-routing block, Commercial Terms D.4, Fable 5 safeguards, enforcement history, plus the OpenAI / xAI / Z.ai / Moonshot / Google provider-terms matrix, with citations |
 | [references/reprompter-relay.md](references/reprompter-relay.md) | Pairing recipe: run a prompt-engineering skill (e.g. RePrompter) before relaying a nontrivial task; documents the RePrompter handoff contract |
 | [references/custom-targets.md](references/custom-targets.md) | User-connected targets: `~/.agents/relay-targets.json` registry for local models (Ollama, LM Studio, MLX) and other one-shot CLIs — field contract, preflight, security rules |
 
@@ -602,6 +680,9 @@ while a same-provider second opinion should stay in-session as a subagent.
 | zcode: `Model config is missing. Create ~/.zcode/cli/config.json …` | One-time setup — follow the ZCode recipes in [references/cli-reference.md](references/cli-reference.md) |
 | `zcode login`: `OAuth response is not valid JSON` | Known open bug — skip login entirely; use the config-file or env-var recipe instead |
 | OpenCode `-f` file attach errors | Pipe via stdin instead (`cat file \| opencode run …`) |
+| Kimi says no provider / not logged in | Run `kimi login` and complete the device-code flow. This is the native Kimi OAuth store; do not log out of or rewrite OpenCode/Z.AI auth |
+| Kimi K3 is unavailable / returns a plan entitlement error | Keep the requested model visible and report the plan error. Let the user name another native alias such as `kimi-code/kimi-for-coding`; never silently route Kimi through GLM or OpenCode Go |
+| Kimi `-p` changed files during a review | Print mode uses the `auto` permission policy and cannot combine with `--plan`. Pass the diff/file text in the prompt, or configure static Kimi deny rules before granting repo access |
 | agy reads/writes files in `~/.gemini/antigravity-cli/scratch` instead of your repo | Antigravity's default working dir is its own scratch workspace — pass `--add-dir /path/to/repo` (it becomes the working directory) |
 | agy: `flag needs an argument: -print` | No stdin pipe — use `agy -p "$(cat /tmp/handoff.md)"` |
 | agy `-p` never returns when launched inside a parallel multi-CLI burst | Known agy 1.1.0 timing bug (solo/pairwise runs are reliable) — run the Gemini lane sequentially around the burst, and always cap it with a timeout |
