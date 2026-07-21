@@ -627,7 +627,7 @@ exits. Any CLI option works with `-p`.
 
 | Flag | Meaning |
 |------|---------|
-| `--model <model>` | Alias (`fable`, `opus`, `sonnet`) or full name (`claude-fable-5`). |
+| `--model <model>` | Alias (`fable`, `opus`, `sonnet`) or full name/variant (for example `claude-fable-5[1m]`). |
 | `--output-format <fmt>` | `text` (default), `json` (single result), `stream-json` (NDJSON). |
 | `--input-format <fmt>` | `text` (default), `stream-json`. |
 | `--effort <level>` | `low\|medium\|high\|xhigh\|max`. |
@@ -644,6 +644,11 @@ exits. Any CLI option works with `-p`.
 `stream-json` requires `--verbose`; token-level deltas also need `--include-partial-messages`.
 Session id lookup for `--resume` is scoped to the current directory and its git worktrees.
 
+Use the `CLAUDE_MODEL` resolution block from `SKILL.md` before these commands. Never strip a printable `[1m]` suffix.
+It is part of the model variant; an ANSI escape would contain an actual ESC control byte.
+Passing the shorter alias can resolve to a different or unavailable model on
+accounts whose settings select a full long-context id.
+
 In-session alternative (usually preferred for a single same-provider opinion): the harness's
 native subagent — no subprocess, result returns straight to the orchestrator.
 
@@ -658,7 +663,7 @@ Claude `--output-format json` returns one object:
 ```
 
 ```bash
-result=$(claude -p "task" --model fable --output-format json)
+result=$(claude -p "task" --model "$CLAUDE_MODEL" --output-format json)
 echo "$result" | jq -r '.result'          # answer text
 echo "$result" | jq -r '.session_id'       # for --resume
 echo "$result" | jq -r '.total_cost_usd'   # spend
@@ -668,7 +673,7 @@ Claude `stream-json`: one JSON object per line. First line is a `system` event, 
 (session id, model, tools, MCP servers). Tee the raw stream before parsing:
 
 ```bash
-claude -p "refactor the config loader" --model fable \
+claude -p "refactor the config loader" --model "$CLAUDE_MODEL" \
   --output-format stream-json --verbose \
   | tee /tmp/run.jsonl \
   | jq -r 'select(.type=="result") | .result'

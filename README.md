@@ -65,6 +65,7 @@ lives in `references/reprompter-relay.md`.
 | `references/custom-targets.md` | Connect your own targets (local models via Ollama/LM Studio/MLX, any one-shot CLI) through `~/.agents/relay-targets.json` |
 | `references/reprompter-relay.md` | Pairing recipe for [RePrompter](https://github.com/AytuncYildizli/reprompter): structure the prompt first, then relay it |
 | `scripts/regression-grok-safety.sh` | Deterministic guard that fails if the Grok isolation safeguard or its security anchors regress |
+| `scripts/regression-claude-target.sh` | Deterministic guard that preserves configured Claude model variants such as Fable's printable `[1m]` suffix |
 | `LICENSE.txt` | MIT license |
 
 ## Install
