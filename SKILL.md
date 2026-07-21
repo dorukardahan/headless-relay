@@ -277,7 +277,7 @@ cheaper, no subprocess, and it stays inside the harness's own session accounting
 
 | Orchestrator | Same-provider model | Other-provider model |
 |--------------|---------------------|----------------------|
-| Claude Code | Agent tool subagent (`fable`/`opus`/`sonnet`) | headless CLI |
+| Claude Code | Agent tool subagent; inherit only when the parent already runs the target variant | headless CLI |
 | Codex CLI | Codex native subagents (`[agents]` config; ask "spawn one agent per…") | headless CLI |
 | OpenClaw / Hermes / other | the harness's own subagent / task mechanism | headless CLI |
 
@@ -570,7 +570,7 @@ harness is the orchestrator. Two ways to hand off to Claude, and they are NOT in
 
 | Method | When to use |
 |--------|-------------|
-| Native subagent (`model: "inherit"` when the configured model is a full variant) | Default. In-session, no subprocess, result returns straight to the orchestrator. Do not replace a configured full id with the shorter `fable` alias. |
+| Native subagent (`model: "inherit"` only when the parent already runs the desired variant) | In-session, no subprocess, result returns straight to the orchestrator. When switching variants, select an explicit installed full id supported by the harness; do not replace it with the shorter `fable` alias. |
 | `claude -p … --model "$CLAUDE_MODEL"` | When Claude must run truly parallel alongside the codex/opencode/grok subprocesses in one shell burst, or you need a clean JSON transcript with its own session id. |
 
 An orchestrator's native subagents spawn its OWN provider's models only — they cannot reach

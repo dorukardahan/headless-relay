@@ -23,6 +23,13 @@ need() { # file substring
   fi
 }
 
+forbid() { # file substring
+  if grep -qF "$2" "$ROOT/$1" 2>/dev/null; then
+    echo "FAIL: forbidden Claude model guidance in $1: \"$2\""
+    fail=1
+  fi
+}
+
 need "SKILL.md" 'HEADLESS_RELAY_CLAUDE_MODEL'
 need "SKILL.md" 'CLAUDE_MODEL="${CLAUDE_MODEL:-fable}"'
 need "SKILL.md" 'claude -p "your question here" --model "$CLAUDE_MODEL"'
@@ -30,6 +37,9 @@ need "SKILL.md" 'The printable `[1m]` suffix is a model variant, not ANSI bold.'
 need "references/cli-reference.md" 'claude-fable-5[1m]'
 need "references/cli-reference.md" 'Never strip a printable `[1m]` suffix.'
 need "README.md" 'scripts/regression-claude-target.sh'
+need "SKILL.md" '`model: "inherit"` only when the parent already runs the desired variant'
+forbid "SKILL.md" 'model: "fable"'
+forbid "SKILL.md" 'Agent tool subagent (`fable`'
 
 # Every executable Claude print-mode example must pass the resolved model
 # variable. A raw alias can collapse an account's configured long-context id.
