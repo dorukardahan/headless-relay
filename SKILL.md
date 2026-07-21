@@ -277,7 +277,7 @@ cheaper, no subprocess, and it stays inside the harness's own session accounting
 
 | Orchestrator | Same-provider model | Other-provider model |
 |--------------|---------------------|----------------------|
-| Claude Code | Agent tool subagent (`fable`/`opus`/`sonnet`) | headless CLI |
+| Claude Code | Agent tool subagent; inherit only when the parent already runs the target variant | headless CLI |
 | Codex CLI | Codex native subagents (`[agents]` config; ask "spawn one agent per…") | headless CLI |
 | OpenClaw / Hermes / other | the harness's own subagent / task mechanism | headless CLI |
 
@@ -314,6 +314,28 @@ agentic but were wire-verified not to upload your repo. **Grok is the exception 
 isolated (see the Grok section above) or it uploads your whole repo. Never present the Grok
 baseline as "read-only" or "local".**
 
+Resolve the Claude model once before using any Claude print-mode example. An explicit relay
+override wins; otherwise preserve the exact model configured by the active Claude profile or the
+canonical Claude settings, then fall back to the portable alias. Model ids are opaque strings:
+The printable `[1m]` suffix is a model variant, not ANSI bold. ANSI control sequences start with
+an ESC byte; never remove printable bracket suffixes from a model id.
+
+```bash
+CLAUDE_MODEL="${HEADLESS_RELAY_CLAUDE_MODEL:-}"
+CLAUDE_PROFILE_SETTINGS="${CLAUDE_CONFIG_DIR:+${CLAUDE_CONFIG_DIR}/settings.json}"
+for CLAUDE_SETTINGS in \
+  "$CLAUDE_PROFILE_SETTINGS" \
+  "$HOME/.claude/settings.json"
+do
+  [ -n "$CLAUDE_MODEL" ] && break
+  [ -r "$CLAUDE_SETTINGS" ] || continue
+  command -v jq >/dev/null 2>&1 || continue
+  CLAUDE_MODEL="$(jq -r '.model | select(type == "string" and length > 0) // empty' \
+    "$CLAUDE_SETTINGS" 2>/dev/null)"
+done
+CLAUDE_MODEL="${CLAUDE_MODEL:-fable}"
+```
+
 ```bash
 # GPT (Codex) — default sandbox is read-only, no network
 codex exec "your question here"
@@ -333,7 +355,7 @@ grok_relay "your question here"
 agy -p "your question here" --model "Gemini 3.1 Pro (High)"
 
 # Claude (headless subprocess)
-claude -p "your question here" --model fable
+claude -p "your question here" --model "$CLAUDE_MODEL"
 ```
 
 ## How to pass the prompt (three forms)
@@ -375,7 +397,7 @@ grok_relay "$(cat /tmp/handoff.md)"
 agy -p "$(cat /tmp/handoff.md)"
 
 # Claude: command-substitute the file into the prompt arg
-claude -p "$(cat /tmp/handoff.md)" --model fable
+claude -p "$(cat /tmp/handoff.md)" --model "$CLAUDE_MODEL"
 ```
 
 ## Scenarios
@@ -454,7 +476,7 @@ an isolated text-only Grok call — do not point Grok at the repo.
 | Claude | `--output-format json` | `jq -r '.result'`; session id = `.session_id`, cost = `.total_cost_usd` |
 
 ```bash
-result=$(claude -p "summarize the repo" --model fable --output-format json)
+result=$(claude -p "summarize the repo" --model "$CLAUDE_MODEL" --output-format json)
 echo "$result" | jq -r '.result'
 ```
 
@@ -463,8 +485,8 @@ Every CLI is stateless per headless call unless you thread the session id (run f
 directory).
 
 ```bash
-sid=$(claude -p "start a review" --model fable --output-format json | jq -r '.session_id')
-claude -p "now check the error paths" --resume "$sid"
+sid=$(claude -p "start a review" --model "$CLAUDE_MODEL" --output-format json | jq -r '.session_id')
+claude -p "now check the error paths" --model "$CLAUDE_MODEL" --resume "$sid"
 ```
 
 `codex exec resume --last`, `opencode run -c` (continue) or `-s <id>`, `grok -r [id]` /
@@ -548,8 +570,8 @@ harness is the orchestrator. Two ways to hand off to Claude, and they are NOT in
 
 | Method | When to use |
 |--------|-------------|
-| Native subagent (e.g. Agent tool, `model: "fable"`) | Default. In-session, no subprocess, result returns straight to the orchestrator. Cheapest. |
-| `claude -p … --model fable` | When Claude must run truly parallel alongside the codex/opencode/grok subprocesses in one shell burst, or you need a clean JSON transcript with its own session id. |
+| Native subagent (`model: "inherit"` only when the parent already runs the desired variant) | In-session, no subprocess, result returns straight to the orchestrator. When switching variants, select an explicit installed full id supported by the harness; do not replace it with the shorter `fable` alias. |
+| `claude -p … --model "$CLAUDE_MODEL"` | When Claude must run truly parallel alongside the codex/opencode/grok subprocesses in one shell burst, or you need a clean JSON transcript with its own session id. |
 
 An orchestrator's native subagents spawn its OWN provider's models only — they cannot reach
 another provider. That is why cross-provider targets ALWAYS require a headless shell call,
