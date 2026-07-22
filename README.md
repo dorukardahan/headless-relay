@@ -15,35 +15,42 @@ is a single `git clone`; everything else on this page is detail for when you nee
 
 > ### ⚠️ Security: the Grok lane and your repository
 >
-> The xAI Grok Build CLI, run inside a git repository, uploads your **entire repo: full git
-> history and all tracked files, including a tracked `.env`**, to xAI cloud storage, regardless
-> of which files the model reads. This is confirmed by xAI's own Grok account on X and by independent
-> wire capture, and it is **not** stopped by `--disable-web-search` or by telling the model not to
-> read files. As of v2.0.0 this skill runs every Grok call **fail-closed**: isolated in an empty
-> non-git directory, never in your repo, and it refuses rather than risk leaking. As of **v2.0.3**
-> every Grok call goes through two helper functions that add a clean, temporary `GROK_HOME` (so
-> Grok can't load your global `~/.grok/AGENTS.md` — nor (v2.0.5, via a synthetic `HOME`) your
-> `~/.claude/CLAUDE.md` / hooks / skills / MCP — into the model turn (real egress paths, verified on
-> grok 0.2.99/0.2.101) and deny Grok's own tools (`--deny '*'`), plus a best-effort sandbox. These
-> narrow the exposure to the prompt itself — they do **not** make Grok local; it is still a cloud
-> model. (The isolation stops the bundle because a git bundle can only come from a git repo; we
-> could not measure that directly while xAI server-disables the feature, so SECURITY.md states it
-> as a sound inference, not a lab result.) Repo-context work is routed to Codex, Gemini, GLM, or
-> Claude — a wire-test showed none of them send a whole-repo bundle (they are still cloud models
-> that transmit the files they actually read). If you have already used Grok Build in a real repo,
-> read **[SECURITY.md](SECURITY.md)**.
+> Earlier shipped versions of the xAI Grok Build CLI, run inside a git repository, uploaded
+> your **entire repo: full git history and all tracked files, including a tracked `.env`** to
+> xAI cloud storage, regardless of which files the model reads — confirmed by xAI's own Grok
+> account on X and by independent wire capture. On 2026-07-15 xAI open-sourced Grok Build
+> (Apache-2.0), deleted previously-retained coding data, and set retention off by default. A
+> source audit of the released code (commit `c68e39f`) found the whole-repo bundle path is
+> **gone** from source, the remaining trace-upload pipeline (the model's own turn I/O) defaults
+> **off**, and your local `~/.grok/config.toml` beats xAI's remote settings — xAI cannot
+> remotely re-enable an upload you've turned off locally. Two residuals remain, and this skill
+> still guards both: Grok auto-loads global rules into every turn — your other tools' config (a
+> Claude-Code/Cursor/Codex compatibility scan of `~/.claude` / `~/.cursor` / `~/.codex`, rooted at
+> `$HOME`) AND grok's own `~/.grok/AGENTS.md` (rooted at `$GROK_HOME`) — and the shipped binary can't
+> be verified against the source (no signed releases or reproducible build), true of any closed-binary
+> relay target, not unique to Grok. So `grok_relay` / `grok_media` still run Grok under a **hermetic
+> `env -i` child environment** (an allowlist — only a handful of vars reach grok, dropping your other
+> secrets and grok's own endpoint / auth-provider-command / log / compat overrides) with an empty
+> synthetic `HOME` AND a clean temporary `GROK_HOME` (your real login reached out-of-band via
+> `GROK_AUTH_PATH`, or `XAI_API_KEY`), in an empty non-git directory (verified outside any git tree),
+> with its tool use locked down and a real watchdog timeout. Scope is personal / consumer auth —
+> team/enterprise managed-policy parity is unverified. None of this makes Grok local
+> — it is still a cloud model; the prompt and Grok's reasoning go to xAI. For the full history, the
+> audit, and what to do if you already used Grok Build in a real repo, read **[SECURITY.md](SECURITY.md)**.
 
 ## What it can do
 
 - **Second opinions**: hand a diff, a bug, a PR review, or a design question to GPT, GLM,
   Grok, Gemini, or Claude
 - **Consensus**: send the same prompt to several models in parallel and compare answers
-- **Image / video generation**: headless, through Codex or Gemini (no repo bundle) or Grok (isolated);
-  Grok is the only lane that also does video. The skill documents each CLI's quirks
+- **Image / video generation**: headless, through Codex, Gemini, or Grok (Grok under a hermetic
+  `env -i` + empty HOME + clean temp GROK_HOME, only the four media tools allowed, media published
+  atomically); Grok is
+  the only lane that also does video. The skill documents each CLI's quirks
 - **Scripting**: JSON output parsing and session resume for multi-turn work
 - **Safety rails**: a preflight gate (installed + logged in?), a provider-terms compliance gate
-  for non-native harnesses, and a **fail-closed data-egress guard for Grok** (see the security
-  note above and [SECURITY.md](SECURITY.md))
+  for non-native harnesses, and a **hardened, tool-restricted helper for Grok (hermetic `env -i` + empty
+  HOME + clean temp GROK_HOME, personal-scope auth)** (see the security note above and [SECURITY.md](SECURITY.md))
 - **Custom targets**: add any one-shot CLI as a lane (local models included) via a small
   JSON registry, contributed by [@AytuncYildizli](https://github.com/AytuncYildizli)
 
@@ -59,7 +66,7 @@ lives in `references/reprompter-relay.md`.
 | File | Purpose |
 |------|---------|
 | `SKILL.md` | Core instructions (loaded by the agent) |
-| `SECURITY.md` | Grok whole-repo upload: threat, primary sources, xAI's response, the wire-test, and hardening/migration for anyone who already ran Grok |
+| `SECURITY.md` | Grok's historical whole-repo upload: primary sources, xAI's 2026-07-15 open-source response, the source audit, and migration notes for anyone who ran an old Grok Build version |
 | `references/cli-reference.md` | Per-CLI flag tables, ZCode setup recipes, output shapes, troubleshooting |
 | `references/anthropic-terms.md` | Provider-terms compliance detail with citations |
 | `references/custom-targets.md` | Connect your own targets (local models via Ollama/LM Studio/MLX, any one-shot CLI) through `~/.agents/relay-targets.json` |
@@ -96,8 +103,10 @@ At least one target-model CLI installed and authenticated:
 - `codex` (OpenAI Codex CLI) with a ChatGPT plan or API key
 - `opencode` with a Z.ai Coding Plan credential, and/or the ZCode desktop app (its bundled
   `zcode` command works headlessly after a one-time setup, see `references/cli-reference.md`)
-- `grok` (xAI Grok Build) with a SuperGrok login. Note: the skill runs Grok isolated (never in
-  your repo) because Grok Build uploads the whole repo to xAI. See [SECURITY.md](SECURITY.md)
+- `grok` (xAI Grok Build) with a SuperGrok login (or `XAI_API_KEY`). Note: the skill runs Grok
+  under a hermetic `env -i` + empty `HOME` + a clean temp `GROK_HOME` with its tool use locked down — belt-and-suspenders now
+  that xAI has open-sourced Grok Build and a source audit found the old whole-repo upload path gone.
+  See [SECURITY.md](SECURITY.md)
 - `agy` (Google Antigravity CLI, the Gemini CLI's replacement) with a Google login.
   Install: `curl -fsSL https://antigravity.google/cli/install.sh | bash`
 - `claude` (Claude Code), only usable as a TARGET when the orchestrator is first-party
@@ -119,6 +128,8 @@ MIT, see `LICENSE.txt`. Command behavior was live-verified 2026-07-02 against co
 re-verified 2026-07-08 on grok 0.2.91 with grok-4.5, then 2026-07-13 on grok 0.2.99 (two things
 that day: the availability check was reworked because `grok models` can print "not authenticated"
 on a merely-expired cached token while still listing models in the same output; and a data-egress
-wire-test drove the v2.0.0 Grok isolation policy, see [SECURITY.md](SECURITY.md)); the Gemini
-lane was verified 2026-07-08 on Antigravity agy 1.1.0. CLIs drift fast, so re-verify flags when
-something errors.
+wire-test drove the v2.0.0 Grok isolation policy, see [SECURITY.md](SECURITY.md)), then
+re-assessed again 2026-07-15 after xAI open-sourced Grok Build — a source audit of the released
+code (commit `c68e39f`) found the whole-repo bundle path gone, see [SECURITY.md](SECURITY.md);
+the Gemini lane was verified 2026-07-08 on Antigravity agy 1.1.0. CLIs drift fast, so re-verify
+flags when something errors.

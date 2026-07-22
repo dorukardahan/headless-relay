@@ -3,9 +3,13 @@
 Full per-CLI detail for `headless-relay`. Flags verified 2026-07-02 against installed
 binaries: opencode 1.14.31, claude (Claude Code) 2.1.198, zcode CLI 0.15.0 (ZCode desktop app
 3.2.2, recipes re-verified on app 3.3.3); GPT section re-verified 2026-07-10 on codex-cli
-0.144.0 (GPT-5.6 launch); Grok section re-verified 2026-07-08 on grok 0.2.91 (grok-4.5
-launch); Antigravity section verified 2026-07-08 on agy 1.1.0. Flags drift — re-check
-`--help` when a command errors with `unexpected argument`.
+0.144.0 (GPT-5.6 launch); Grok section re-verified 2026-07-08 on grok 0.2.91 (grok-4.5 launch),
+then re-assessed 2026-07-15 after xAI open-sourced Grok Build (source audit of commit
+`c68e39f`) — the whole-repo bundle is gone from source; the residuals are the two-root
+global-rule leak (Claude/Cursor compat from `$HOME` + grok's own `~/.grok/AGENTS.md`) and the
+unverifiable shipped binary; Antigravity section verified
+2026-07-08 on agy 1.1.0. Flags drift — re-check `--help` when a command errors with
+`unexpected argument`.
 
 ## Contents
 - [GPT — codex exec](#gpt--codex-exec)
@@ -222,24 +226,39 @@ UNVERIFIED; only the paid-plan `builtin:zai` / `builtin:zai-coding-plan` bridge 
 
 ## Grok — grok headless
 
-### ⚠️ Data egress: Grok uploads the whole repo — isolation is mandatory
+### Data egress: Grok's whole-repo upload was real, then fixed — two residuals remain
 
-Run inside a git repository, Grok Build packages the **entire tracked repo as a git bundle (full
-commit history + every tracked file, including a tracked `.env`)** and uploads it to xAI's Google
-Cloud Storage bucket `grok-code-session-traces` (`POST /v1/storage`), separate from and
-independent of the files the model reads on the model-turn channel (`/v1/responses` on
-`cli-chat-proxy.grok.com`). Not stopped by `--disable-web-search`, deny rules, a "don't read
-files" prompt, or the "Improve the model" toggle. Confirmed by xAI's Grok account on X
-(status 2076298375150911623) and by cereblab's mitmproxy capture
-(github.com/cereblab/grok-build-exfil-repro; gist dc9a40bc26120f4540e4e09b75ffb547), which
-recovered a never-read canary from the uploaded bundle. Only untracked / gitignored-and-never-
-committed files stay out of the bundle; a tracked `.env` and any file ever committed (even if
-later deleted) are in it. See [../SECURITY.md](../SECURITY.md) for the full write-up.
+**Historical.** Run inside a git repository, older shipped versions of Grok Build packaged the
+**entire tracked repo as a git bundle (full commit history + every tracked file, including a
+tracked `.env`)** and uploaded it to xAI's Google Cloud Storage bucket `grok-code-session-traces`
+(`POST /v1/storage`), separate from and independent of the files the model reads on the
+model-turn channel (`/v1/responses` on `cli-chat-proxy.grok.com`). It was not stopped by
+`--disable-web-search`, deny rules, a "don't read files" prompt, or the "Improve the model"
+toggle. Confirmed by xAI's Grok account on X (status 2076298375150911623) and by cereblab's
+mitmproxy capture (github.com/cereblab/grok-build-exfil-repro; gist
+dc9a40bc26120f4540e4e09b75ffb547), which recovered a never-read canary from the uploaded bundle.
+Only untracked / gitignored-and-never-committed files stayed out of the bundle; a tracked `.env`
+and any file ever committed (even if later deleted) was in it. See
+[../SECURITY.md](../SECURITY.md) for the full write-up.
 
-**Wire-test, 2026-07-13, grok 0.2.99, this-machine** (method: whole-machine en0 egress delta on a
-synthetic canary repo carrying a 19 MB incompressible never-read blob; grok cross-checked via its
-own `trace.upload.decision` log; positive control: a 10 MB POST measured 11.5 MB, so the method
-catches multi-MB uploads; baseline noise ~0.25 MB):
+**2026-07-15: xAI open-sourced Grok Build** (Apache-2.0, github.com/xai-org/grok-build), deleted
+previously-retained coding data, and set retention off by default. A source audit of the released
+code (commit `c68e39f`) found:
+
+- The whole-repo bundle path is **gone**: no `git bundle`, `codebase_upload`, or whole-repo
+  archive route exists in the source anymore.
+- The remaining trace-upload pipeline serializes only the model's own turn I/O, and telemetry
+  **defaults off**.
+- `config_files.json` upload is **hard-disabled** in source.
+- Your local `~/.grok/config.toml` **beats xAI's remote settings** (confirmed by reading the
+  resolver, and by a repo test) — xAI cannot remotely re-enable an upload you've turned off
+  locally.
+
+**Wire-test, 2026-07-13, grok 0.2.99, this-machine** (predates the 2026-07-15 open-source release;
+kept for history. Method: whole-machine en0 egress delta on a synthetic canary repo carrying a
+19 MB incompressible never-read blob; grok cross-checked via its own `trace.upload.decision` log;
+positive control: a 10 MB POST measured 11.5 MB, so the method catches multi-MB uploads; baseline
+noise ~0.25 MB):
 
 | Lane | cwd | egress | whole-repo bundle? |
 |------|-----|-------:|--------------------|
@@ -249,81 +268,99 @@ catches multi-MB uploads; baseline noise ~0.25 MB):
 | GLM / opencode | inside canary repo | 0.17 MB | NO |
 | Gemini / agy | inside canary repo | 0.31 MB | NO |
 
-Both grok runs logged `trace.upload.decision`: `uploads_enabled=False`, `upload_reason=feature_off`,
-`trace_upload_source=remote`, `has_remote_settings=True`, `data_collection_disabled=False`. So the
-upload is currently **off, but purely via a revocable server-side flag** — no local setting is
-responsible and the capability is still in the 0.2.99 client. xAI can re-enable it for any account
-or version at any time (and other accounts / enterprise states may already have it on). The xAI CLI
-changelog (0.2.94→0.2.99) says nothing about upload/telemetry/privacy: there is no documented
-client fix. **Do not rely on the current "off" state.** Codex, GLM (opencode), and Gemini (agy) sent
-no whole-repo bundle in the same test — they are the safe lanes for repo-context work.
+At the time, both grok runs logged `trace.upload.decision`: `uploads_enabled=False`,
+`upload_reason=feature_off`, `trace_upload_source=remote`, `has_remote_settings=True`,
+`data_collection_disabled=False` — off via a revocable server-side flag, with the capability
+still present in the 0.2.99 client and no local setting responsible. The xAI CLI changelog
+(0.2.94→0.2.99) said nothing about upload/telemetry/privacy: there was no documented client fix
+at the time. **The 2026-07-15 source audit above supersedes this finding**: the capability is
+gone from source, not merely server-suppressed. Codex, GLM (opencode), and Gemini (agy) sent no
+whole-repo bundle in the same test.
 
-**Because isolation could not be positively demonstrated** (the feature was server-suppressed, so
-in-repo and isolated both showed no bundle, and there is no local force-enable to test against), the
-skill's isolation guarantee rests on the architectural fact that a git bundle can only be built from
-a git repo: an empty non-git working directory has no repo to bundle. Logically sound; re-verify
-with the wire-test above if xAI re-enables the feature.
+**Two residuals remain**, and the `grok_relay` / `grok_media` helpers in `SKILL.md` still guard
+both:
 
-**Mandatory rule (v2.0.3):** never run `grok` from the caller's repo, `$HOME`, or any dir with real
-data. Use the **`grok_relay` / `grok_media` helper functions defined in `SKILL.md`** — do not hand-
-roll a raw `grok` call. Each helper runs in a fresh empty non-git temp dir with a **clean, temporary
-`GROK_HOME`** (so no global `~/.grok/AGENTS.md` / rules / skills / MCP load into the model turn —
-§4a of [../SECURITY.md](../SECURITY.md)), restricts tools (`--deny '*'` for text; a `--tools`
-media-only allow-list for `grok_media`), adds `--sandbox strict`, and fails closed if
-isolation cannot be guaranteed (`mktemp` failed, `git` absent, or the temp dir is inside a repo).
-The shape, for reference (the real `grok_relay` / `grok_media` helpers in SKILL.md add a subshell
-`trap` cleanup and a minimal safe `config.toml` on top of this — use them, don't hand-roll):
+1. **Global-rule leak (two roots).** Grok auto-loads global rules into every turn. (a) A
+   Claude-Code/Cursor compatibility scan — every `[compat.*]` cell defaults `true` in source — reads
+   `~/.claude/CLAUDE.md`, `~/.cursor`, `~/.claude.json` MCP config, skills, and hooks, all rooted at
+   `$HOME`. (b) grok's OWN `~/.grok/AGENTS.md` / skills / hooks / MCP, rooted at `$GROK_HOME`
+   (`agents_md.rs` always scans `grok_home()`). Either way the text is injected into the model turn,
+   which then goes to xAI (observed with canary files on 0.2.99/0.2.101; §4 of [../SECURITY.md](../SECURITY.md)).
+2. **Unverifiable binary.** The shipped binary can't be verified against the audited source: no
+   GitHub releases or signatures, no reproducible build, the installer pulls from a different
+   private repo, auto-update `exec()`s unsigned bytes, and a local `cargo build` reports a
+   version matching no release. This is a general caveat for **any** closed-binary relay target
+   (Codex, agy included), not unique to Grok.
+
+Grok remains a **cloud model** either way — the prompt and Grok's reasoning go to xAI, open-source
+client or not.
+
+**Helpers (v3.0.0):** `grok_relay` (text) and `grok_media` (image/video) run every Grok call under a
+**hermetic child environment** — `env -i` with an allowlist, so only `PATH`, `HOME`, `GROK_HOME`,
+`TMPDIR`, `TERM`, the telemetry-off master switches, and ONE auth var reach grok; everything else
+(your other secrets AND grok's own endpoint / proxy / auth-provider-command / log / managed-config /
+compat overrides) is dropped. Three separate clean temp dirs back it: an empty synthetic `HOME`
+(compat scanners find nothing), a clean temporary `GROK_HOME` (grok's own `~/.grok/AGENTS.md` / skills
+/ hooks / MCP find nothing) — NOT your real `~/.grok` — and an empty non-git working dir the helper
+verifies is OUTSIDE any git worktree (it does not trust `TMPDIR`). Auth is supplied out-of-band:
+subscription login via `GROK_AUTH_PATH` → your real `auth.json` (grok precedence
+`${GROK_HOME:-$HOME/.grok}/auth.json`; grok refreshes it in place; the wrapper never reads, copies, or
+syncs it), or `XAI_API_KEY` (no auth file touched); the branches are mutually clean by construction
+(under `env -i`, only the chosen branch's auth var is present). grok runs with `--deny '*'` (text) or a
+media-only `--tools` allow-list (`grok_media`) as belt-and-suspenders against the unverifiable binary,
+under a real watchdog timeout that reaps grok's process tree on timeout/INT/TERM/HUP. Each helper
+is a subshell (`name() ( … )`) with `set +eux` (xtrace off, so a key can't be traced onto stderr) and
+cleanup `trap`s on EXIT/INT/TERM/HUP. Scope is personal/consumer auth (subscription OAuth or
+`XAI_API_KEY`); team/enterprise managed-policy parity is unverified — managed-policy readers read
+`auth.json` directly from `GROK_HOME`, bypassing `GROK_AUTH_PATH`, so under the temp `GROK_HOME` it is
+not carried. The shape, for reference (use the real helpers in `SKILL.md`, don't hand-roll):
 
 ```bash
-gh="$(mktemp -d "${TMPDIR:-/tmp}/grok-home.XXXXXX")"; iso="$(mktemp -d "${TMPDIR:-/tmp}/grok-iso.XXXXXX")"
-if [ -z "$gh" ] || [ -z "$iso" ] || ! command -v git >/dev/null 2>&1 || git -C "$iso" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-  echo "grok-relay: cannot isolate; refusing to run Grok" >&2
-else
-  [ -n "$XAI_API_KEY" ] || { cp "$HOME/.grok/auth.json" "$gh/auth.json" 2>/dev/null; seed="$(cksum < "$gh/auth.json" 2>/dev/null)"; }
-  ( cd "$iso" && HOME="$gh" GROK_HOME="$gh" grok -p "…" -m grok-4.5 --disable-web-search --sandbox strict --deny '*' 2>/dev/null ); rc=$?
-  # Sync grok's refreshed token back IF it CHANGED (a refresh can succeed even if the turn later
-  # errors) — else a discarded temp home rotates your real ~/.grok login out. Changed + non-empty.
-  [ -z "$XAI_API_KEY" ] && [ -s "$gh/auth.json" ] && [ "$(cksum < "$gh/auth.json" 2>/dev/null)" != "$seed" ] && { stg="$(mktemp "$HOME/.grok/.auth.relay.XXXXXX" 2>/dev/null)" && cp "$gh/auth.json" "$stg" && mv -f "$stg" "$HOME/.grok/auth.json"; }
-fi
-rm -rf "$iso" "$gh"
+gh=$(mktemp -d "${TMPDIR:-/tmp}/grok-home.XXXXXX")    # empty synthetic HOME + clean temp GROK_HOME (no external-config scan)
+iso=$(mktemp -d "${TMPDIR:-/tmp}/grok-iso.XXXXXX")     # empty non-git CWD (verify it is OUTSIDE any git worktree before use)
+ap="${GROK_AUTH_PATH:-${GROK_HOME:-$HOME/.grok}/auth.json}"   # real auth path (grok precedence), absolutised BEFORE the cd
+grokbin=$(command -v grok)                             # env -i uses a minimal PATH, so pass grok's absolute path
+printf '[features]\ntelemetry = false\n[telemetry]\ntrace_upload = false\n[folder_trust]\nenabled = false\n[harness]\ndisable_codebase_upload = true\n[compat.claude]\nskills = false\nrules = false\nagents = false\nmcps = false\nhooks = false\nsessions = false\n[compat.cursor]\nskills = false\nrules = false\nagents = false\nmcps = false\nhooks = false\nsessions = false\n[compat.codex]\nskills = false\nrules = false\nagents = false\nmcps = false\nhooks = false\nsessions = false\n' > "$gh/config.toml"
+# HERMETIC: env -i is an ALLOWLIST — only these vars reach grok; EVERYTHING else (your other secrets
+# AND grok's endpoint/proxy/auth-provider-command/log/managed-config/compat overrides) is dropped.
+( cd "$iso" && env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin HOME="$gh" GROK_HOME="$gh" TMPDIR="$gh" TERM=dumb \
+    GROK_TELEMETRY_ENABLED=false GROK_TELEMETRY_TRACE_UPLOAD=false GROK_EXTERNAL_OTEL=false GROK_AUTH_PATH="$ap" \
+    "$grokbin" -p "…" -m grok-4.5 --disable-web-search --sandbox strict --deny '*' )
+rm -rf "$gh" "$iso"
 ```
 
-**Per-user hardening (optional, defense-in-depth — never a substitute for isolation).** These are
-retention/telemetry controls, not a promise the data never transmits. Provenance is mixed — labels
-below; verify per version:
+`--deny '*'` is the load-bearing tool block — binary-observed on 0.2.99 to actually refuse tool calls
+(forcing one produced `Denied by permission policy`) and it already covers `web_search`. `grok_relay`
+additionally keeps `--disable-web-search` and a best-effort `--sandbox strict` as cheap extra layers
+(the sandbox fails open for built-in profiles — an inapplicable profile warns and continues
+unenforced rather than refusing to start — so it is not relied on). `--deny '*'` also blocks
+`image_gen`/`image_edit`, which is why `grok_media` swaps it for a `--tools` allow-list of just the
+four media tools (plus `--disallowed-tools search_tool,use_tool`). For the API-key branch, pass
+`XAI_API_KEY` in place of `GROK_AUTH_PATH` — under `env -i` the other branch's vars are simply absent
+(no scrubbing needed) — which skips subscription login entirely and reads no auth file.
+
+**Per-user hardening (optional, defense-in-depth).** These are retention/telemetry controls, not a
+promise the data never transmits — worth setting regardless, now that the bundle path is gone
+from source. Provenance is mixed — labels below; verify per version:
 - In-CLI **`/privacy`** (official) toggles data retention and, per xAI, deletes previously synced
   data. Retention, not transmission. Consumer opt-out is **not** ZDR — official ZDR is Team/
   Enterprise-only (docs.x.ai/build/enterprise).
 - `~/.grok/config.toml`: `[telemetry] trace_upload = false` and `[features] telemetry = false` are
   **official settings** (xAI configuration reference) and were **verified honored on 0.2.99**
   (2026-07-14, one setup: setting them flipped `trace_upload_source` from `remote` to `config`).
-  `[harness] disable_codebase_upload = true` is **community-reported** (recognized by the binary;
-  wire-verified only on 0.2.93; its effect on the bundle channel is unmeasurable while uploads are
-  server-off). To confirm a control is LOCAL on your setup, run Grok once and check the
-  `trace.upload.decision` log shows `trace_upload_source=config` or `env` — `source=remote` is not
-  local protection. The skill only READS user config; it never writes it.
-- The official `[tools] respect_gitignore=true` limits search/read tools only; it does **not** stop
-  the whole-repo bundle.
-- **Global-rule leak — clean `GROK_HOME` + synthetic `HOME` (v2.0.3–2.0.5).** By default Grok loads
-  your global `~/.grok/AGENTS.md` AND (via Claude/Cursor compat scanners, all default ON) your
-  `~/.claude/CLAUDE.md` / hooks / skills / `~/.claude.json` MCP into every model turn (verified
-  on 0.2.99/0.2.101; §4a of [../SECURITY.md](../SECURITY.md)). The `grok_relay` / `grok_media` helpers
-  point `GROK_HOME` **and `HOME`** at a throwaway temp seeded with only auth plus a minimal config
-  that sets every `[compat.*]` cell `= false`. The synthetic `HOME` is load-bearing: `~/.claude*`
-  lives under `$HOME`, not `GROK_HOME`, so relocating `HOME` is what removes it (`grok inspect` then
-  shows Project Instructions / MCP / Hooks = `0`). They copy Grok's refreshed token back to the real
-  `~/.grok/auth.json` **on change** via an `mktemp`-unique staging file (else the discarded temp home
-  would rotate your subscription login out over repeated relays; `.auth.relay.$$` could collide for
-  same-shell parallel calls); `XAI_API_KEY` skips the copy. Because the home is clean, your `config.toml` kill-switches above do **not** apply to a relay
-  call — it relies on isolation + clean home + deny, not those flags.
-- **Second exposure — Grok's own tools** — baked into the helpers since v2.0.2/v2.0.3: text relays
-  carry `--deny '*'` (verified on 0.2.99 by forcing a tool call → `Denied by permission policy`)
-  plus `--sandbox strict`. Caveats: the sandbox **fails open** for built-in profiles (an inapplicable
-  profile warns and continues unenforced; only an explicit custom profile refuses to start) — the
-  clean home, deny rules, and isolation are the load-bearing parts; `--deny '*'` also blocks the
-  image/video tools, so `grok_media` (v2.0.4) allow-lists ONLY the 4 media tools with `--tools`
-  instead; `--permission-mode dontAsk` is accepted but NOT yet enforced; macOS does not block a
-  child process's network. See the helper definitions and kill-switch notes in `SKILL.md`.
+  `[harness] disable_codebase_upload = true` is **community-reported**: it is NOT in the 2026-07-15
+  source snapshot, but it IS present in the installed binary's static strings, so the helpers set it
+  in their minimal temp config as binary-observed defense-in-depth (effect not independently proven).
+  Note the v3.0.0 relay runs under a clean temp `GROK_HOME`, so your `~/.grok/config.toml` does not
+  apply to relay calls — the helper's own minimal config (which pins all three of these plus the
+  compat cells off) does; setting them in `~/.grok/config.toml` hardens grok when YOU run it directly.
+  To confirm a control is LOCAL on your own runs, check the `trace.upload.decision` log shows
+  `trace_upload_source=config` or `env` — `source=remote` is not local protection. The skill only
+  READS your `~/.grok/config.toml`; it never writes it (its minimal config lives in the throwaway
+  temp `GROK_HOME`).
+- The official `[tools] respect_gitignore=true` limits search/read tools only.
+
+See the helper definitions and kill-switch notes in `SKILL.md`.
 
 Headless via `-p`. Use `-m grok-4.5` — xAI's coding/agents frontier model (launched
 2026-07-08, trained with Cursor; 500K context; reasoning-effort supported, default `high`).
@@ -346,7 +383,7 @@ as a CLI model.
 | `--check` | Append a self-verification loop to the prompt (headless only). |
 | `-r, --resume [id]` / `-c, --continue` | Resume by id / most recent. |
 | `--verbatim` | Send the prompt exactly as given. |
-| `--cwd <dir>` | Working directory. **Relevant to the data-egress safeguard: the repo Grok bundles is the one at/above its working directory. `--cwd` alone was not proven sufficient — the tested-safe pattern is to `cd` into a fresh non-git temp dir (see the isolation block above) so there is no repo to bundle.** |
+| `--cwd <dir>` | Working directory. Historically tied to the data-egress risk above (older versions bundled the repo at/above this directory) — the source audit shows that path is gone, but `grok_relay` / `grok_media` still `cd` into a fresh empty non-git temp dir as defense-in-depth against the unverifiable binary. |
 | `--always-approve` | Auto-approve tool executions (write mode). Omit for read-only audits. |
 
 `grok agent` runs Grok without the interactive UI; subcommands `stdio` (ACP), `headless`
@@ -359,20 +396,18 @@ fatal: Transport channel closed, when Auth(AuthorizationRequired)`, and a silent
 stderr error at all even after a fresh login). Diagnose definitively before blaming auth:
 
 ```bash
-# Run this diagnostic ISOLATED + fail-closed (it is a real grok -p — same shape as grok_relay).
-GROK_HOME_TMP="$(mktemp -d "${TMPDIR:-/tmp}/grok-home.XXXXXX")"
-GROK_ISO="$(mktemp -d "${TMPDIR:-/tmp}/grok-iso.XXXXXX")"
-if [ -z "$GROK_HOME_TMP" ] || [ -z "$GROK_ISO" ] || ! command -v git >/dev/null 2>&1 || git -C "$GROK_ISO" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-  echo "grok-relay: cannot isolate; refusing Grok" >&2
-else
-  [ -n "$XAI_API_KEY" ] || cp "$HOME/.grok/auth.json" "$GROK_HOME_TMP/auth.json" 2>/dev/null
-  ( cd "$GROK_ISO" && HOME="$GROK_HOME_TMP" GROK_HOME="$GROK_HOME_TMP" RUST_LOG=debug grok -p "test" -m grok-4.5 --disable-web-search --sandbox strict --deny '*' 2>/tmp/grok-debug.log ) &
-  GROK_PID=$!; sleep 75; grep -c errorcode_502 /tmp/grok-debug.log; kill "$GROK_PID" 2>/dev/null
-  # No token sync-back here: this call is deliberately KILLED, so the temp token state is
-  # indeterminate — do not copy it back. This one-off diagnostic may rotate your token once; if it
-  # logs you out, run `grok login`, or set XAI_API_KEY to avoid the token copy entirely.
-fi
-[ -n "$GROK_ISO" ] && rm -rf "$GROK_ISO" "$GROK_HOME_TMP"
+# Run this diagnostic with the same hermetic isolation as grok_relay (env -i allowlist + empty HOME +
+# clean temp GROK_HOME + auth via GROK_AUTH_PATH; see the data-egress section above) — a real grok -p,
+# timeout-wrapped. (Minimal config.toml omitted for brevity; env -i + empty HOME + GROK_HOME isolate.)
+gh=$(mktemp -d "${TMPDIR:-/tmp}/grok-home.XXXXXX")
+iso=$(mktemp -d "${TMPDIR:-/tmp}/grok-iso.XXXXXX")
+ap="${GROK_AUTH_PATH:-${GROK_HOME:-$HOME/.grok}/auth.json}"
+grokbin=$(command -v grok)
+( cd "$iso" && env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin HOME="$gh" GROK_HOME="$gh" TMPDIR="$gh" TERM=dumb \
+    GROK_TELEMETRY_ENABLED=false GROK_TELEMETRY_TRACE_UPLOAD=false GROK_EXTERNAL_OTEL=false GROK_AUTH_PATH="$ap" \
+    RUST_LOG=debug "$grokbin" -p "test" -m grok-4.5 --disable-web-search --sandbox strict --deny '*' 2>/tmp/grok-debug.log ) &
+GROK_PID=$!; sleep 75; grep -c errorcode_502 /tmp/grok-debug.log; kill "$GROK_PID" 2>/dev/null
+rm -rf "$gh" "$iso"
 ```
 
 A nonzero count means xAI's inference proxy (`cli-chat-proxy.grok.com`) is returning Cloudflare
@@ -425,15 +460,14 @@ token is current, confirming it simply mirrors process-start state.)
 Walk this ladder in order and stop at the first verdict:
 
 1. `command -v grok` fails → **not installed**.
-2. Run `grok models` **isolated + fail-closed** and bounded
-   (`GI="$(mktemp -d "${TMPDIR:-/tmp}/grok-iso.XXXXXX")"; if [ -z "$GI" ] || ! command -v git >/dev/null 2>&1 || git -C "$GI" rev-parse --is-inside-work-tree >/dev/null 2>&1; then echo "grok-relay: cannot isolate; refusing" >&2; else ( cd "$GI" && perl -e 'alarm shift; exec @ARGV' 40 grok models ); fi; [ -n "$GI" ] && rm -rf "$GI"`).
-   It is only a catalog fetch, but isolate it with the same guard so rule #1 (never run `grok` in
-   the repo) has no exception. If the
-   output lists models — a `Default model:` line or an `Available models:` block — Grok is
-   **available**, whether the header says "You are logged in" OR "You are not authenticated".
-   The catalog was just fetched over an authenticated connection; the expired token, if any,
-   was refreshed in the same call. (Match on the model-list text, e.g.
-   `grep -qE 'Available models:|Default model:'`, not on the header line.)
+2. Run `grok models` with the same hermetic isolation shape as `grok_relay` (env -i allowlist + empty
+   HOME + clean temp GROK_HOME + auth via GROK_AUTH_PATH), bounded by a timeout
+   (`gh=$(mktemp -d "${TMPDIR:-/tmp}/grok-home.XXXXXX"); iso=$(mktemp -d "${TMPDIR:-/tmp}/grok-iso.XXXXXX"); ap="${GROK_AUTH_PATH:-${GROK_HOME:-$HOME/.grok}/auth.json}"; grokbin=$(command -v grok); ( cd "$iso" && env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin HOME="$gh" GROK_HOME="$gh" TMPDIR="$gh" TERM=dumb GROK_TELEMETRY_ENABLED=false GROK_TELEMETRY_TRACE_UPLOAD=false GROK_EXTERNAL_OTEL=false GROK_AUTH_PATH="$ap" perl -e 'alarm shift; exec @ARGV' 40 "$grokbin" models ); rm -rf "$gh" "$iso"`).
+   It is only a catalog fetch. If the output lists models — a `Default model:` line or an
+   `Available models:` block — Grok is **available**, whether the header says "You are logged
+   in" OR "You are not authenticated". The catalog was just fetched over an authenticated
+   connection; the expired token, if any, was refreshed in the same call. (Match on the
+   model-list text, e.g. `grep -qE 'Available models:|Default model:'`, not on the header line.)
 3. Output shows "You are not authenticated." with NO model list, and `~/.grok/auth.json` is
    missing or empty (`[ ! -s ~/.grok/auth.json ]` — test existence only, never print
    contents) → **genuinely logged out**. Tell the user to run `grok login` (interactive;
@@ -443,19 +477,17 @@ Walk this ladder in order and stop at the first verdict:
    call — at most one, never a retry loop:
 
    ```bash
-   # Run the sentinel ISOLATED + fail-closed — it is a real grok -p (same shape as grok_relay).
-   GROK_HOME_TMP="$(mktemp -d "${TMPDIR:-/tmp}/grok-home.XXXXXX")"
-   GROK_ISO="$(mktemp -d "${TMPDIR:-/tmp}/grok-iso.XXXXXX")"
-   if [ -z "$GROK_HOME_TMP" ] || [ -z "$GROK_ISO" ] || ! command -v git >/dev/null 2>&1 || git -C "$GROK_ISO" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-     echo "grok-relay: cannot isolate; refusing Grok" >&2
-   else
-     [ -n "$XAI_API_KEY" ] || { cp "$HOME/.grok/auth.json" "$GROK_HOME_TMP/auth.json" 2>/dev/null; seed="$(cksum < "$GROK_HOME_TMP/auth.json" 2>/dev/null)"; }
-     ( cd "$GROK_ISO" && HOME="$GROK_HOME_TMP" GROK_HOME="$GROK_HOME_TMP" perl -e 'alarm shift; exec @ARGV' 120 \
-         grok -p "Reply with exactly GROK_OK and nothing else." -m grok-4.5 --disable-web-search --sandbox strict --deny '*' ); rc=$?
-     # sync refreshed token back on CHANGE (see grok_relay): a temp GROK_HOME would else rotate your login out
-     [ -z "$XAI_API_KEY" ] && [ -s "$GROK_HOME_TMP/auth.json" ] && [ "$(cksum < "$GROK_HOME_TMP/auth.json" 2>/dev/null)" != "$seed" ] && { stg="$(mktemp "$HOME/.grok/.auth.relay.XXXXXX" 2>/dev/null)" && cp "$GROK_HOME_TMP/auth.json" "$stg" && mv -f "$stg" "$HOME/.grok/auth.json"; }
-   fi
-   [ -n "$GROK_ISO" ] && rm -rf "$GROK_ISO" "$GROK_HOME_TMP"
+   # Run the sentinel with the same hermetic isolation as grok_relay (env -i allowlist + empty HOME +
+   # clean temp GROK_HOME + auth via GROK_AUTH_PATH) — a real grok -p, timeout-wrapped.
+   gh=$(mktemp -d "${TMPDIR:-/tmp}/grok-home.XXXXXX")
+   iso=$(mktemp -d "${TMPDIR:-/tmp}/grok-iso.XXXXXX")
+   ap="${GROK_AUTH_PATH:-${GROK_HOME:-$HOME/.grok}/auth.json}"
+   grokbin=$(command -v grok)
+   ( cd "$iso" && env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin HOME="$gh" GROK_HOME="$gh" TMPDIR="$gh" TERM=dumb \
+       GROK_TELEMETRY_ENABLED=false GROK_TELEMETRY_TRACE_UPLOAD=false GROK_EXTERNAL_OTEL=false GROK_AUTH_PATH="$ap" \
+       perl -e 'alarm shift; exec @ARGV' 120 \
+       "$grokbin" -p "Reply with exactly GROK_OK and nothing else." -m grok-4.5 --disable-web-search --sandbox strict --deny '*' ); rc=$?
+   rm -rf "$gh" "$iso"
    ```
 
    If the session is about to send Grok a real prompt anyway, skip the sentinel and run that
@@ -540,12 +572,24 @@ the higher-quality Imagine model"):
 | `reference_to_video` | multi-image references + prompt → video |
 
 There is no dedicated flag — you drive the tool through the prompt. Grok is the **only** lane with
-video (`image_to_video` / `reference_to_video`). The same **data-egress rules apply to media**
-(repo bundle + global-rule leak), so media goes through the **`grok_media` helper defined in
-`SKILL.md`**: isolated non-git CWD, clean `GROK_HOME`, `--sandbox strict`, and a `--tools` allow-list
-of ONLY the four media tools (`--deny '*'` would block `image_gen` too — verified on 0.2.101).
-`image_gen` writes under the temp `GROK_HOME`; the helper `find`s the artifact and moves it to your
-output dir (and returns non-zero if nothing was produced).
+video (`image_to_video` / `reference_to_video`). The same residual concerns apply to media as to
+text (the global-rule leak + the unverifiable binary — see the data-egress section above), so
+media goes through the **`grok_media` helper defined in `SKILL.md`**: a hermetic `env -i` allowlist +
+empty `HOME` + a clean temp `GROK_HOME` (not your real `~/.grok`; auth via `GROK_AUTH_PATH` or
+`XAI_API_KEY`), an empty non-git CWD (verified outside any git tree), a real watchdog timeout, and a
+`--tools` allow-list of ONLY the four media tools (`--deny '*'` would block `image_gen` too —
+binary-observed on 0.2.101). `image_gen` writes under the temp `GROK_HOME` session dir; the helper then
+publishes only this call's artifacts by copying each into a temp in the output dir and claiming the
+final name by **hard-linking** it into place — the ONE atomic, no-clobber, no-follow publish primitive.
+A no-hardlink filesystem **fails closed** (no `mv`, no reserve-then-fill — a reopen-by-path could follow
+a swapped symlink). It also fails closed *before* publishing on any newline-in-name, and refuses any
+file not physically inside the sandbox. Race-safe under concurrent cooperative calls. It returns
+non-zero and rolls back ONLY this call's own files (verified by inode) if nothing was produced or grok
+failed/timed out/was signalled; it **never removes the output dir** (a rolled-back call that created it
+leaves it in place (usually empty; a rare local `.grokpub` signal-window temp may remain — see
+SECURITY.md), avoiding a reverse-timing race with a concurrent call). The answer file and the media
+manifest live in a separate control base grok is not handed a path to (raises the bar against a
+temp-enumerating binary; not a jail — see SECURITY.md).
 
 ```bash
 grok_media /tmp/img-brief.md /path/to/output-dir
@@ -554,11 +598,10 @@ grok_media /tmp/img-brief.md /path/to/output-dir
 where the brief instructs: "Use your `image_gen` tool to generate <description>. Save the file
 in the current working directory. Print the saved absolute path on its own line prefixed with
 `SAVED:`. If you have no image tool, print `IMAGE TOOL: NONE`." `--disable-web-search` does NOT
-disable the media tools AND does NOT stop the repo upload — isolation + clean home are the
-safeguards, not that flag.
-For image-only work, prefer Codex or agy (below): neither sent a whole-repo bundle in the
-wire-test, so they can write straight into your output dir. Live-verified on 0.2.101: `image_gen`
-runs under `grok_media`'s isolation + clean `GROK_HOME` + `--sandbox strict` with a `--tools`
+disable the media tools — the `--tools` allow-list is the safeguard, not that flag.
+For image-only work, Codex or agy (below) need no such helper — neither has a global-rule-leak or
+data-egress history, so they write straight into your output dir. Live-verified on 0.2.101:
+`image_gen` runs under `grok_media`'s empty non-git CWD + clean temp `GROK_HOME` with a `--tools`
 allow-list of only the four media tools (a blanket `--deny '*'` blocks `image_gen`).
 
 ### GPT (Codex) — image_gen works headless (with an effort caveat)
@@ -707,8 +750,8 @@ structured output for the precise reason. When capturing a piped tool's exit thr
 | Codex stops with a clarifying question instead of reviewing | Default read-only sandbox blocked a command it needed | Escalate sandbox only as far as needed; or pre-fetch data into the prompt file |
 | Codex answer seems shallow on a 5.6 model | GPT-5.6 models default to LOW reasoning effort | Pass `-c model_reasoning_effort="high"` / `"ultra"` explicitly (or pin it in config.toml) |
 | Prompt with backticks / `$` / newlines mangled or executed | Shell interpreted the inline `"…"` | Write to a file; feed via stdin, `--prompt-file`, or a quoted `"$(cat file)"` |
-| Grok ran inside a real repo without isolation | Grok bundles + uploads the whole tracked repo + git history to xAI GCS (see the data-egress block above) | Isolate every Grok call in a non-git temp dir; if it already happened, follow [../SECURITY.md](../SECURITY.md) to check logs and rotate exposed secrets |
-| "Is Grok read-only / local / safe?" | No — it is the one lane that uploads your whole repo | Never present Grok as read-only/local; text-in/answer-out from an isolated dir only; route repo-context work to Codex/Gemini/GLM/Claude |
+| You ran an old, pre-2026-07-15 Grok Build in a real repo | Older versions bundled + uploaded the whole tracked repo + git history to xAI GCS (see the data-egress section above; the path is gone from source in the open-sourced release) | Follow [../SECURITY.md](../SECURITY.md) to check logs and rotate any exposed secrets |
+| "Is Grok read-only / local / safe?" | No — it's a cloud model like the others. The whole-repo upload is gone per the 2026-07-15 source audit; the global-rule leak and the unverifiable binary remain | Never present Grok as local; run it through `grok_relay`'s hermetic env-i + empty-HOME + clean-temp-GROK_HOME shape either way |
 | Grok stderr noise: `AuthorizationRequired`, `Skipping MCP tool` (stdout still arrives) | Cosmetic startup noise + digit-prefixed MCP tool names | Pipe `2>/dev/null` |
 | Grok `-p` hangs 2+ min, no stdout (stderr may show `worker quit with fatal … Auth(AuthorizationRequired)`, or nothing) | Provider-side 502 from `cli-chat-proxy.grok.com` (CLI swallows it), or a stale cached token | Run the `RUST_LOG=debug` diagnosis in the Grok section: 502s in the log = provider outage, skip Grok and retry later; no 502s + fatal auth line = `grok login` + one retry. Wrap unattended calls in a timeout |
 | Grok surfaces unrelated tweets/blogs as "evidence" | Web search left on | Add `--disable-web-search` |

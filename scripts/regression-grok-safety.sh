@@ -1,39 +1,41 @@
 #!/bin/sh
-# Regression guard for the Grok data-egress safeguard (headless-relay v2.0.0+).
+# Regression guard for the Grok data-egress safeguard (headless-relay v3.0.0+, "M6" hermetic design).
 #
-# Grok Build leaks in three ways when run carelessly: (1) it uploads the whole tracked repo + git
-# history when run inside a repo; (2) it auto-loads your global ~/.grok/AGENTS.md / rules / MCP into
-# the model turn (verified 0.2.99/0.2.101); (3) its own tools can read elsewhere on the machine. From
-# v2.0.3 the skill's defence is two helper functions (grok_relay / grok_media) that, for every Grok
-# call, run in an empty non-git temp dir (signature: `rev-parse --is-inside-work-tree`), with a clean
-# temporary `GROK_HOME`, a tool restriction (text: `--deny '*'`; media: a `--tools` allow-list), and
-# `--sandbox strict` — all fail-closed (v2.0.4: subshell `trap` cleanup + change-based token sync).
+# BACKGROUND. Earlier *shipped* Grok Build versions uploaded the whole tracked repo (+ git history)
+# to xAI when run inside a repo. xAI open-sourced Grok Build on 2026-07-15 (Apache-2.0); a source
+# audit of that release found the whole-repo bundle path GONE, uploads default off, and local config
+# beating remote settings (see SECURITY.md §4). Two egress residuals remain — the Claude/Cursor/Codex
+# compat scan (from $HOME) and grok's own ~/.grok/AGENTS.md scan (from $GROK_HOME) — plus a large
+# surface of behaviour-changing env vars (endpoint/proxy redirects, GROK_AUTH_PROVIDER_COMMAND, log
+# files, managed config, compat toggles). So the skill's Grok defence is two subshell helper functions
+# (grok_relay / grok_media) that run every Grok call under a HERMETIC child environment:
+#   - `env -i` with an ALLOWLIST      (only PATH/HOME/GROK_HOME/TMPDIR/TERM/telemetry-off/ONE auth var
+#                                      reach grok; every other var — secrets AND grok overrides — dropped);
+#   - an EMPTY synthetic HOME         (so the $HOME-rooted compat scan finds nothing);
+#   - a CLEAN temporary GROK_HOME     (so the $GROK_HOME-rooted grok-native scan finds nothing);
+#   - auth OUT-OF-BAND: GROK_AUTH_PATH -> the user's real auth.json, OR XAI_API_KEY (no auth file);
+#   - an empty non-git working dir (verified outside any git worktree) + a tool restriction
+#     (text: `--deny '*'`; media: a `--tools` allow-list) + a real watchdog timeout.
 #
 # This check fails if:
-#   1. a required security anchor (SECURITY.md, the SKILL/README/cli-reference/terms warnings) is gone;
-#   2. the `grok_relay` and `grok_media` helper functions are not defined in SKILL.md;
-#   3. in any fenced ```bash block, a RAW `grok <flag>` binary call (i.e. NOT a grok_relay/grok_media
-#      helper invocation — those have no space after `grok`) is missing any layer it needs:
-#        - every raw call (relay OR `grok models`/`grok agent`) needs the isolation guards
-#          (`rev-parse --is-inside-work-tree` and `command -v git`), counted per call;
-#        - every raw RELAY call (grok -p / --single / --prompt-file / --prompt-json / --check /
-#          --resume / --continue / -r / -c) additionally needs `GROK_HOME`, a synthetic `HOME` (v2.0.5), `--sandbox strict`,
-#          and a tool restriction (`--deny` OR a `--tools` allow-list), counted per call.
-# Counting is per-block and layer-independent (a flag may sit on a line-continuation), so a raw call
-# that drops GROK_HOME, the sandbox, the deny, or a guard trips the count. Comment-only lines are
-# excluded, so prose mentions do not count. Helper invocations (`grok_relay "…"`, `grok_media …`)
-# are NOT raw calls: `grok` is immediately followed by `_`, never a space, so they never match.
+#   1. a required security anchor (SECURITY.md, the SKILL/README/cli-reference notes, the helpers) is gone;
+#   2. in any fenced ```bash block, a RAW relay `grok`/`"$grokbin"` call (one that sends a MODEL TURN:
+#      -p / --single / --prompt-file / --prompt-json / --check / --resume / --continue / -r / -c) is
+#      missing any M6 layer it needs, counted per block:
+#        - `env -i`                 (HERMETIC allowlist — the M6 marker; a blocklist `env -u` is FORBIDDEN);
+#        - a synthetic ` HOME=`     (empty home so the compat scanners find no ~/.claude / ~/.cursor / ~/.codex);
+#        - a `GROK_HOME=`           (clean temp home so grok's own ~/.grok/AGENTS.md is not scanned);
+#        - a tool restriction       (`--deny` OR a `--tools` allow-list);
+#        - an auth mechanism        (`GROK_AUTH_PATH=` OR `XAI_API_KEY=`).
+# Relay calls are matched POSITIVELY by their relay flag, so `command -v grok`, `grok login`, a "grok
+# not found" string, the model id `grok-4.5`, and catalog calls (`grok models`/`agent`/`inspect`) are
+# NOT counted and need nothing. Helper INVOCATIONS (`grok_relay "…"`, `grok_media …`) are not raw calls.
+# Counting is per-block and layer-independent (a flag/assignment may sit on a line-continuation).
 #
-# WHAT THIS IS — and IS NOT. This is a text-signature TRIPWIRE, not a security proof. It catches the
-# likely regressions (a fenced raw Grok call that lost its isolation guard, clean GROK_HOME, sandbox,
-# or deny). It does NOT:
-#   - prove the guard isolates at runtime (the unverified negative documented in SECURITY.md — a git
-#     bundle can only come from a git repo, but it was never wire-measured);
-#   - scan inline/prose command mentions — only ```-fenced blocks are scanned (docs use no other fence);
-#   - tie a specific flag to a specific call within a block — it counts layer occurrences per block, so
-#     a raw call co-located with an unrelated `--deny`/`GROK_HOME` could in principle slip. None of
-#     these forms exist in the repo today; the tripwire's job is to keep it that way.
-# Treat a green result as "no obvious regression", not "proven safe".
+# WHAT THIS IS — and IS NOT. A text-signature TRIPWIRE, not a security proof (the runtime proof is
+# scripts/test-grok-runtime.sh). It catches the likely regression (a fenced raw relay call that lost
+# its hermetic env / empty HOME / clean GROK_HOME / auth / tool restriction, or that reverted to an
+# `env -u` blocklist). It does NOT prove runtime isolation. Treat green as "no obvious regression".
 #
 # No dependencies beyond POSIX sh + awk + grep. Run from anywhere.
 
@@ -49,64 +51,63 @@ need() { # file  substring
 }
 
 [ -s "$ROOT/SECURITY.md" ] || { echo "FAIL: SECURITY.md is missing or empty"; fail=1; }
-need "SKILL.md"                      "isolation is mandatory"
-need "SKILL.md"                      "rev-parse --is-inside-work-tree"
 need "SKILL.md"                      "grok_relay()"
 need "SKILL.md"                      "grok_media()"
+need "SKILL.md"                      "empty synthetic"
+need "SKILL.md"                      "env -i"
+need "SKILL.md"                      "GROK_AUTH_PATH"
 need "SKILL.md"                      "GROK_HOME"
-need "README.md"                     "Security: the Grok lane and your repository"
-need "references/cli-reference.md"   "Data egress: Grok uploads the whole repo"
-need "references/cli-reference.md"   "rev-parse --is-inside-work-tree"
-need "references/anthropic-terms.md" "Data ingestion"
+need "SECURITY.md"                   "is gone from the source"
+need "SECURITY.md"                   "empty synthetic"
+need "SECURITY.md"                   "env -i"
+need "README.md"                     "SECURITY.md"
+need "references/cli-reference.md"   "GROK_AUTH_PATH"
+need "references/cli-reference.md"   "env -i"
 
-# Per fenced code block, over CODE lines only (comments stripped): every RAW grok binary call must
-# carry the layers it needs. Layer occurrences are counted per block (line-continuation safe).
+# Per fenced code block, over CODE lines only (comments stripped): every RAW relay grok/"$grokbin"
+# call must carry env -i, a synthetic HOME=, a GROK_HOME=, a tool restriction, and an auth mechanism;
+# and must NOT use an `env -u` blocklist. Counted per block.
 for f in "SKILL.md" "references/cli-reference.md"; do
-  # gsub(re,"&",copy) returns the match count without changing content.
   awk -v F="$f" '
     /^[[:space:]]*```/ {
       if (inb) {
-        # ANY raw grok binary call = "grok" + space(s) + a non-space arg. This is flag-ORDER
-        # independent (catches "grok -m grok-4.5 -p …" as well as "grok -p …"). It excludes the
-        # helper invocations grok_relay/grok_media (a "_" follows "grok", never a space) and the
-        # model-id token "grok-4.5" (a "-" follows "grok", never a space).
-        t0 = code; nany = gsub(/grok +[^ ]/, "&", t0)
-        # Catalog subcommands (grok models / grok agent) send no model turn → isolation guards only.
-        t2 = code; ncat = gsub(/grok +(models|agent)/, "&", t2)
-        # Benign non-egress commands (auth / version / help) need no guards at all.
-        tb = code; nbenign = gsub(/grok +(login|--version|--help|-V|-h)/, "&", tb)
-        ncall  = nany - nbenign          # every real grok call (relay + catalog) needs isolation guards
-        nrelay = nany - ncat - nbenign   # relay calls additionally need GROK_HOME / --sandbox / tool-restriction
-        t3 = code; nguard = gsub(/rev-parse --is-inside-work-tree/, "&", t3)
-        t4 = code; ngit   = gsub(/command -v git/, "&", t4)
-        # Count only the load-bearing env ASSIGNMENT (GROK_HOME="…"), not variable-name references
-        # like $GROK_HOME_TMP — else a block that names its var GROK_HOME_TMP inflates the count and
-        # the check goes dead. (GROK_HOME_TMP= does not match GROK_HOME= : the char after E is "_".)
-        t5 = code; nhome  = gsub(/GROK_HOME=/, "&", t5)
-        # Synthetic HOME assignment on the grok line (v2.0.5) — " HOME=" with a leading space so it
-        # does NOT match "GROK_HOME=" (preceded by "_"). Blocks Grok scanning the real ~/.claude.
-        th = code; nhomeenv = gsub(/ HOME=/, "&", th)
-        t6 = code; nsand  = gsub(/--sandbox strict/, "&", t6)
-        # Tool restriction = a --deny rule (text: --deny '*') OR a --tools allow-list (media). Either
-        # satisfies "the relay call restricts tools". Count both.
+        # Relay calls: a grok / "$grokbin" token immediately followed by a relay (model-turn) flag.
+        # This positively excludes `command -v grok`, `grok login`, "grok not found", `grok-4.5`,
+        # and catalog `grok models`/`agent`/`inspect` (none are followed by a relay flag).
+        t0 = code
+        nrelay = gsub(/(grok|grokbin")[ ]+(-p|--prompt-file|--prompt-json|--single|--check|--resume|--continue|-r|-c)([ "]|$)/, "&", t0)
+        # Hermetic allowlist marker.
+        te = code; nenvi = gsub(/env -i/, "&", te)
+        # A blocklist reversion is forbidden in a relay block.
+        tu = code; nblock = gsub(/env -u/, "&", tu)
+        # Synthetic HOME assignment - " HOME=" with a leading space so it does NOT match "GROK_HOME="
+        # nor "${HOME:-...}"/"$HOME/" (":" or "/" follows, not "=").
+        th = code; nhome = gsub(/ HOME=/, "&", th)
+        # Clean temp GROK_HOME assignment (the ASSIGNMENT only; "GROK_HOME:-" ref is not counted).
+        tg = code; ngrok = gsub(/GROK_HOME=/, "&", tg)
+        # Tool restriction = --deny (text) OR --tools allow-list (media).
         t7 = code; nrestrict = gsub(/--deny|--tools/, "&", t7)
-        if (ncall > 0 && nguard < ncall) {
-          printf "FAIL: %d raw Grok call(s) but only %d isolation guard(s) (rev-parse) in %s (block near line %d)\n", ncall, nguard, F, start; rc = 1
-        }
-        if (ncall > 0 && ngit < ncall) {
-          printf "FAIL: %d raw Grok call(s) but only %d git-absent guard(s) (command -v git) in %s (block near line %d)\n", ncall, ngit, F, start; rc = 1
-        }
-        if (nrelay > 0 && nhome < nrelay) {
-          printf "FAIL: %d raw Grok relay call(s) but only %d clean-GROK_HOME(s) in %s (block near line %d)\n", nrelay, nhome, F, start; rc = 1
-        }
-        if (nrelay > 0 && nhomeenv < nrelay) {
-          printf "FAIL: %d raw Grok relay call(s) but only %d synthetic-HOME(s) in %s (block near line %d)\n", nrelay, nhomeenv, F, start; rc = 1
-        }
-        if (nrelay > 0 && nsand < nrelay) {
-          printf "FAIL: %d raw Grok relay call(s) but only %d with --sandbox strict in %s (block near line %d)\n", nrelay, nsand, F, start; rc = 1
-        }
-        if (nrelay > 0 && nrestrict < nrelay) {
-          printf "FAIL: %d raw Grok relay call(s) but only %d with tool restriction (--deny/--tools) in %s (block near line %d)\n", nrelay, nrestrict, F, start; rc = 1
+        # Auth mechanism = GROK_AUTH_PATH= (subscription) OR XAI_API_KEY= (API key). ASSIGNMENT only.
+        ta = code; nauth = gsub(/GROK_AUTH_PATH=|XAI_API_KEY=/, "&", ta)
+        if (nrelay > 0) {
+          if (nblock > 0) {
+            printf "FAIL: relay block uses a forbidden `env -u` blocklist (M6 requires the `env -i` allowlist) in %s (block near line %d)\n", F, start; rc = 1
+          }
+          if (nenvi < nrelay) {
+            printf "FAIL: %d raw Grok relay call(s) but only %d hermetic `env -i`(s) in %s (block near line %d)\n", nrelay, nenvi, F, start; rc = 1
+          }
+          if (nhome < nrelay) {
+            printf "FAIL: %d raw Grok relay call(s) but only %d synthetic-HOME(s) in %s (block near line %d)\n", nrelay, nhome, F, start; rc = 1
+          }
+          if (ngrok < nrelay) {
+            printf "FAIL: %d raw Grok relay call(s) but only %d clean-GROK_HOME(s) in %s (block near line %d)\n", nrelay, ngrok, F, start; rc = 1
+          }
+          if (nrestrict < nrelay) {
+            printf "FAIL: %d raw Grok relay call(s) but only %d tool restriction(s) (--deny/--tools) in %s (block near line %d)\n", nrelay, nrestrict, F, start; rc = 1
+          }
+          if (nauth < nrelay) {
+            printf "FAIL: %d raw Grok relay call(s) but only %d auth mechanism(s) (GROK_AUTH_PATH/XAI_API_KEY) in %s (block near line %d)\n", nrelay, nauth, F, start; rc = 1
+          }
         }
         inb = 0
       } else { inb = 1; code = ""; start = NR }
@@ -121,6 +122,6 @@ for f in "SKILL.md" "references/cli-reference.md"; do
 done
 
 if [ "$fail" -eq 0 ]; then
-  echo "OK: Grok data-egress safeguard intact (anchors + helpers present; every fenced raw Grok call is isolation-guarded, git-absent-guarded, clean-GROK_HOME'd, sandboxed, and tool-restricted (--deny/--tools)."
+  echo "OK: Grok data-egress safeguard intact (anchors + helpers present; every fenced raw Grok relay call runs under a hermetic env -i allowlist with a synthetic HOME, a clean GROK_HOME, an auth mechanism (GROK_AUTH_PATH/XAI_API_KEY), and a tool restriction (--deny/--tools); no env -u blocklist)."
 fi
 exit "$fail"
