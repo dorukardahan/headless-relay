@@ -84,6 +84,10 @@ proven; training is a separate policy question).
 - xAI docs (official controls): https://docs.x.ai/build/settings/reference ,
   https://docs.x.ai/build/enterprise (ZDR is enforced at the Team/Enterprise level; xAI also
   states API-key use of Grok Build respects ZDR)
+- Re-checked on X 2026-07-22: the incident, the 2026-07-13 server-side upload halt, and the 2026-07-15
+  open-sourcing stay corroborated by the researcher (cereblab) and follow-up community analyses (through
+  2026-07-20); nothing since contradicts the audit below. The shipped binary remains unverifiable against
+  the source, which is why the helper isolates Grok rather than trusting the toggle, the audit, or the fix.
 
 ---
 
