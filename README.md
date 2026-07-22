@@ -71,7 +71,8 @@ lives in `references/reprompter-relay.md`.
 | `references/anthropic-terms.md` | Provider-terms compliance detail with citations |
 | `references/custom-targets.md` | Connect your own targets (local models via Ollama/LM Studio/MLX, any one-shot CLI) through `~/.agents/relay-targets.json` |
 | `references/reprompter-relay.md` | Pairing recipe for [RePrompter](https://github.com/AytuncYildizli/reprompter): structure the prompt first, then relay it |
-| `scripts/regression-grok-safety.sh` | Deterministic guard that fails if the Grok isolation safeguard or its security anchors regress |
+| `scripts/regression-grok-safety.sh` | Static text tripwire: fails if the Grok isolation safeguard or its security anchors regress |
+| `scripts/test-grok-runtime.sh` | Runtime counterpart to the tripwire: extracts the shipped `grok_relay` / `grok_media` from `SKILL.md` and exercises the isolation, process-lifecycle, and fail-closed publish matrix under sh/bash/zsh against a fake `grok` (real grok / network never touched), with mutation red-green checks |
 | `LICENSE.txt` | MIT license |
 
 ## Install
