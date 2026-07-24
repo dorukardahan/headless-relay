@@ -1,8 +1,8 @@
 ---
 name: headless-relay
-description: Headless handoff guide for running other AI models from inside an agent session (any Agent Skills runtime - Claude Code, Codex, Grok Build, Cursor, OpenClaw, Hermes). Covers GPT (codex exec), GLM (opencode run or zcode --prompt), Grok (grok -p), Gemini (Antigravity agy -p), and Claude (claude -p or a subagent) - inline vs file prompts, parallel multi-model consensus, JSON output, session resume, image/video generation, provider-terms compliance. Use for "ask codex", "ask GLM", "ask grok", "ask gemini", "second opinion", "cross-model review", "generate an image", "run headless", "ask another model".
+description: Headless handoff guide for running other AI models from inside an agent session (any Agent Skills runtime - Claude Code, Codex, Grok Build, Cursor, OpenClaw, Hermes). Covers GPT (codex exec), GLM (opencode run or zcode --prompt), Grok (grok -p), Gemini (Antigravity agy -p), and Claude (claude -p or a subagent) - inline vs file prompts, parallel multi-model consensus, Party/Council Mode across every safely available built-in and custom lane, JSON output, session resume, image/video generation, provider-terms compliance. Use for "ask codex", "ask GLM", "ask Grok", "ask Gemini", "ask Claude", "second opinion", "consensus", "party mode", "council mode", "ask everyone", "run all available models", "her şeyi dene", "hepsine sor", "compare models", or headless image/video generation.
 license: MIT. Complete terms in LICENSE.txt
-metadata: {"version": "3.0.0"}
+metadata: {"version": "3.1.0"}
 ---
 
 # headless-relay
@@ -634,9 +634,25 @@ network"), and the helper keeps your other tools' config AND grok's own global r
 2. Feed it via the per-CLI stdin form above.
 3. Summarize the model's answer; quote its concrete file:line claims verbatim.
 
-### Scenario C — parallel multi-model second opinion / consensus
-Run 2+ models on the SAME prompt file at once (independent shell calls in one message so they
-run concurrently), then compare where they agree and diverge.
+### Scenario C — Party Mode / Council Mode (ask everyone)
+
+When the user says `party mode`, `council mode`, `ask everyone`, `run all available models`,
+`her şeyi dene`, or `hepsine sor`, preflight **every built-in lane plus every valid custom target**,
+then invoke every lane that passes the existing availability, same-provider, provider-terms, and
+data-egress gates. Freeze one prompt file and give every admitted lane those same bytes. Do not
+install tools, log in, rotate auth, or silently substitute models to make the roster look complete.
+
+Compatible cloud/CLI lanes may run in parallel. Antigravity stays sequential because of its
+documented burst hang; heavyweight local custom targets stay sequential unless their registry notes
+explicitly permit concurrency. Capture one artifact and status receipt per lane. The parent
+orchestrator—not one council member—synthesizes shared findings, unique findings, contradictions,
+and skipped-lane reasons. Preserve dissent: majority vote is not evidence.
+
+The full roster states, private run-directory contract, scheduling rules, synthesis format, degraded
+mode behavior, and GREEN gate are in [references/party-mode.md](references/party-mode.md).
+
+For an ordinary hand-picked 2+ model consensus, use the same frozen-prompt pattern with only the
+requested lanes:
 
 ```bash
 codex exec < /tmp/handoff.md > /tmp/ans-gpt.md 2>/dev/null &
