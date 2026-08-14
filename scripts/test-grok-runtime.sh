@@ -53,8 +53,15 @@ if [ "$_hr" != 1 ] || [ "$_hm" != 1 ]; then
   echo "FATAL: could not extract exactly one grok_relay and one grok_media (relay=$_hr media=$_hm)" >&2; exit 2
 fi
 sh -n "$PRISTINE" 2>"$WORK/synerr" || { echo "FATAL: extracted helpers do not parse: $(cat "$WORK/synerr")" >&2; exit 2; }
-for anchor in 'env -i' '\-\-deny' 'image_gen' 'GROK_AUTH_PATH' 'mktemp -d' 'trap ' 'set +eux' 'ln "$curtmp"' 'NO-HARDLINK-FAILCLOSED' 'manifest0' 'pending=' 'sbxreal' '_reappg' 'pgok' 'ps -o pgid=' 'case "$brief$out"' 'pwd -P' '_rollback' 'could not write config' '_ingit' 'profiles.relayauth' 'contains your home directory' 'is a git repository' 'does not hold' 'newline in auth path' 'sandbox metacharacter'; do
+for anchor in 'env -i' '\-\-deny' 'image_gen' 'GROK_AUTH_PATH' 'mktemp -d' 'trap ' 'set +eux' 'ln "$curtmp"' 'NO-HARDLINK-FAILCLOSED' 'manifest0' 'pending=' 'sbxreal' '_reappg' 'pgok' 'ps -o pgid=' 'case "$brief$out"' 'pwd -P' '_rollback' 'could not write config' '_ingit'; do
   grep -q "$anchor" "$PRISTINE" || { echo "FATAL: extracted helpers missing anchor: $anchor" >&2; exit 2; }
+done
+# The auth-grant bounds are DUPLICATED per helper, so a scenario suite that drives only grok_relay
+# cannot see one deleted from grok_media. Require each bound EXACTLY TWICE (once per helper): that
+# closes the whole media-only-deletion class structurally, for every bound, without a scenario each.
+for anchor in 'profiles.relayauth' 'contains your home directory' 'is a git repository' 'does not hold' 'newline in auth path' 'sandbox metacharacter' 'leading/trailing whitespace' '-ef "$ap"'; do
+  _n=$(grep -c -- "$anchor" "$PRISTINE")
+  [ "$_n" = 2 ] || { echo "FATAL: auth-grant bound must appear once per helper (2 total), found $_n: $anchor" >&2; exit 2; }
 done
 
 # --------------------------------------------------------------------------- generate fake grok
@@ -464,6 +471,22 @@ authdir_resolve_mismatch)
   [ "$rc" = 1 ] || fail "expected fail-closed exit 1, got $rc"
   grep -q 'does not hold' "$run/err" || fail "no resolution-invariant message: [$(cat "$run/err")]"
   fake_ran && fail "SECURITY: granted a directory that does not hold the credential"
+  ok ;;
+
+authdir_resolve_decoy)
+  # the newline-free sibling ALSO holds a file with the same basename, so a readability check would
+  # pass while granting the wrong directory. Only an identity (inode) check refuses this.
+  setup_home; nl='
+'
+  mkdir -p "$run/dec$nl" "$run/dec"
+  cp "$realhome/.grok/auth.json" "$run/dec$nl/auth.json"
+  printf '{"decoy":true}\n' > "$run/dec/auth.json"          # same basename, different file
+  ln -s "$run/dec$nl" "$run/dlink" || fail "symlink"
+  export GROK_AUTH_PATH="$run/dlink/auth.json"
+  grok_relay "q" >/dev/null 2>"$run/err"; rc=$?
+  [ "$rc" = 1 ] || fail "expected fail-closed exit 1, got $rc"
+  grep -q 'does not hold' "$run/err" || fail "no identity message: [$(cat "$run/err")]"
+  fake_ran && fail "SECURITY: a same-named decoy satisfied the resolved-dir check"
   ok ;;
 
 authdir_bare_repo_refuse)
@@ -970,7 +993,7 @@ descendant_normal_exit descendant_nonzero_exit publish_sig_int publish_sig_term 
 media_timeout newline_failclosed artifact_spacename concurrent_rollback_isolation nohl_failclosed rollback_preserves_preexisting concurrent_reverse_timing \
 newline_output_dir dash_pgid_safety \
 sandbox_profile_sub sandbox_profile_apikey authdir_home_refuse authdir_repo_refuse authdir_symlink_escape authdir_toml_unsafe \
-sandbox_profile_media authdir_home_media_refuse authdir_newline_path authdir_resolve_mismatch authdir_bare_repo_refuse authdir_glob_refuse"
+sandbox_profile_media authdir_home_media_refuse authdir_newline_path authdir_resolve_mismatch authdir_resolve_decoy authdir_bare_repo_refuse authdir_glob_refuse"
 
 echo "=================================================================================="
 echo " grok_relay / grok_media — RUNTIME isolation proof (M6, fake grok, no network)"
@@ -1040,10 +1063,11 @@ if [ -n "$MUTSHELL" ]; then
   run_mut AF "subscription falls back to builtin strict"   sandbox_profile_sub    's/--sandbox relayauth/--sandbox strict/g'
   run_mut AG "grant widened from the auth dir to \$HOME"   sandbox_profile_sub    's#"$apd" > "$gkh/sandbox.toml"#"$HOME" > "$gkh/sandbox.toml"#g'
   run_mut AH "TOML-safety bound on the auth dir removed"   authdir_toml_unsafe    's#TOML-unsafe character in auth dir" >&2; exit 1#TOML-unsafe character in auth dir" >\&2; true#g'
-  run_mut AI "resolved-dir-holds-the-credential check removed" authdir_resolve_mismatch 's#\[ -r "$apd/${ap##\*/}" \]#true#g'
+  run_mut AI "resolved-dir identity check removed"          authdir_resolve_mismatch 's#\[ "$apd/${ap##\*/}" -ef "$ap" \]#true#g'
+  run_mut AN "identity check weakened to mere readability"  authdir_resolve_decoy    's#\[ "$apd/${ap##\*/}" -ef "$ap" \]#[ -r "$apd/${ap##*/}" ]#g'
   run_mut AJ "bare-repository bound removed"               authdir_bare_repo_refuse 's#\[ -d "$apd/objects" \]#false#g'
-  run_mut AK "newline pre-check dropped (sibling grant via stripping)" authdir_newline_path 's#newline in auth path" >&2; exit 1#newline in auth path" >\&2; true#g'
-  run_mut AL "glob/metacharacter bound removed"            authdir_glob_refuse    's#sandbox metacharacter (\* ? \[) — grok reads a TRAILING#ZZNOMATCHZZ#g'
+  run_mut AK "newline pre-check line deleted"              authdir_newline_path   '/# BEFORE resolving:/d'
+  run_mut AL "glob/metacharacter bound removed"            authdir_glob_refuse    's#skips any other glob entry; refusing" >&2; exit 1#skips any other glob entry; refusing" >\&2; true#g'
   run_mut AM "profile written on the API-key branch too"   sandbox_profile_apikey 's#if \[ -z "$key" \]; then                                     # subscription on grok 1.0.x#if true; then                                     # subscription on grok 1.0.x#g'
 fi
 
