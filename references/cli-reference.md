@@ -303,7 +303,7 @@ both:
 Grok remains a **cloud model** either way — the prompt and Grok's reasoning go to xAI, open-source
 client or not.
 
-**Helpers (v3.0.0):** `grok_relay` (text) and `grok_media` (image/video) run every Grok call under a
+**Helpers (v3.1.1):** `grok_relay` (text) and `grok_media` (image/video) run every Grok call under a
 **hermetic child environment** — `env -i` with an allowlist, so only `PATH`, `HOME`, `GROK_HOME`,
 `TMPDIR`, `TERM`, the telemetry-off master switches, and ONE auth var reach grok; everything else
 (your other secrets AND grok's own endpoint / proxy / auth-provider-command / log / managed-config /
@@ -349,6 +349,7 @@ relayauth_profile() (   # $1 = auth.json path, $2 = the temp GROK_HOME to write 
   [ "$_apd" = / ] && exit 1
   case "$_hp/" in "${_apd%/}"/*) exit 1 ;; esac
   { [ -e "$_apd/.git" ] || { [ -d "$_apd/objects" ] && [ -d "$_apd/refs" ] && [ -e "$_apd/HEAD" ]; }; } && exit 1
+  case "$_apd" in *[[:cntrl:]]*) exit 1 ;; esac   # the raw-path newline check cannot see a control char introduced by symlink resolution
   case "$_apd" in *'"'*|*'\'*) exit 1 ;; esac
   case "$_apd" in *'*'*|*'?'*|*'['*) exit 1 ;; esac    # grok reads a trailing /* or /** as the PARENT dir; other globs are skipped
   _tb=$(printf '\t'); case "$_apd" in ' '*|*' '|"$_tb"*|*"$_tb") exit 1 ;; esac
@@ -417,7 +418,7 @@ as a CLI model.
 | `--prompt-file <PATH>` | Single-turn prompt from a file. |
 | `--prompt-json <JSON>` | Prompt as JSON content blocks. |
 | `-m, --model <MODEL>` | Model id, e.g. `grok-4.6`. |
-| `--sandbox <PROFILE>` | Seatbelt profile: builtin `strict` / `workspace`, or custom from `$GROK_HOME/sandbox.toml` (`[profiles.X]` with `extends` + `read_only` / `read_write` DIRECTORY lists). 1.0.x change: kernel-enforced — `strict` denies file reads outside cwd / `GROK_HOME` / `TMPDIR`, so subscription auth via an outside `GROK_AUTH_PATH` fails with "Not signed in"; the helpers ship `relayauth` (strict + read_write on only the auth dir). An unappliable CUSTOM profile makes grok refuse to start (fail closed, verified on 1.0.3); an unappliable BUILT-IN profile only warns and continues unenforced. The grant is bounded: the resolved dir must actually hold the credential, and is never `/`, never `$HOME` or an ancestor, never a git repository (worktree or bare), never carries `*` `?` `[` or edge whitespace (grok reads a trailing `/*` as the PARENT dir and skips other globs), resolved physically, TOML-safe. |
+| `--sandbox <PROFILE>` | Seatbelt profile: builtin `strict` / `workspace`, or custom from `$GROK_HOME/sandbox.toml` (`[profiles.X]` with `extends` + `read_only` / `read_write` DIRECTORY lists). 1.0.x change: kernel-enforced — `strict` denies file reads outside cwd / `GROK_HOME` / `TMPDIR`, so subscription auth via an outside `GROK_AUTH_PATH` fails with "Not signed in"; the helpers ship `relayauth` (strict + read_write on only the auth dir). An unappliable CUSTOM profile makes grok refuse to start (fail closed, verified on 1.0.3); an unappliable BUILT-IN profile only warns and continues unenforced. The grant is bounded: the resolved dir must actually hold the credential, and is never `/`, never `$HOME` or an ancestor, never a git repository (worktree or bare), never carries `*` `?` `[`, a control character, or a leading/trailing ASCII space or tab (grok reads a trailing `/*` as the PARENT dir and skips other globs), resolved physically, TOML-safe. |
 | `--output-format <FMT>` | `plain` (default), `json`, `streaming-json`. |
 | `--disable-web-search` | Disable web search + fetch. Mandatory for diff-deterministic review. |
 | `--effort <LEVEL>` | `low\|medium\|high\|xhigh\|max`. `--reasoning-effort` also exists. reasoning effort supported (model default `high`; `--effort high` live-verified on grok-4.5 at its launch). |

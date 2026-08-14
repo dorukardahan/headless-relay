@@ -251,7 +251,9 @@ a key can't be traced onto stderr) and cleanup `trap`s on EXIT / INT / TERM / HU
   or any ancestor of it, never a git repository (worktree **or** bare — a bare repo has no `.git`),
   resolved to its physical path first (so a symlinked or `../`-laden path cannot widen it), and
   rejected outright if the path carries a quote, backslash, or newline (checked *before* resolution,
-  because command substitution strips trailing newlines) — or a `*`, `?`, `[`, or edge whitespace,
+  because command substitution strips trailing newlines), a control character anywhere in the RESOLVED
+  path (a symlink into a directory whose name embeds an LF resolves with that LF mid-string, which the
+  raw-path check cannot see), or a `*`, `?`, `[`, or a leading/trailing ASCII space or tab,
   because grok reads a **trailing `/*` or `/**` as the parent directory** (a dir literally named `*`
   would otherwise widen the grant one level, straight past the `$HOME` bound) and silently skips any
   other glob entry. Everything the bounds do NOT name is still grantable, so this is a floor, not a
@@ -261,7 +263,11 @@ a key can't be traced onto stderr) and cleanup `trap`s on EXIT / INT / TERM / HU
   **Not** a concern (checked): the validated path is frozen into `sandbox.toml` and the kernel enforces
   that string, so a same-UID process swapping the directory after the checks cannot widen what was
   granted — and swapping the credential file makes grok's own open resolve outside the grant, which the
-  kernel then denies. Anything outside those bounds fails
+  kernel then denies. (Precisely: the *string* is fixed, so what the kernel enforces cannot be widened;
+  a rename can still change which directory that string names, but a same-UID process could read that
+  directory directly anyway, so nothing is gained. Note also that the whitespace bound covers ASCII
+  space and tab; some other Unicode whitespace would pass it and then be skipped by grok, which fails
+  to authenticate rather than widening anything.) Anything outside those bounds fails
   closed before grok starts. **Hardening tip:** run `grok login` with
   `GROK_AUTH_PATH="$HOME/.grok-auth/auth.json"` and keep that directory dedicated to the credential —
   then the grant covers a directory holding nothing but the token.
@@ -376,8 +382,8 @@ all three vendors, telemetry schema, and the lenient `toml::Value` config parse 
 tool call; `image_gen` runs under the media allow-list; the `disable_codebase_upload` string exists) —
 NOT proven to be the same commit as the source. (3) **Fake-runtime-tested**:
 `scripts/test-grok-runtime.sh` exercises the WRAPPER's isolation, lifecycle, and publish against a
-fake `grok` on sh/bash/zsh (no real grok, no network), 74 scenarios × 3 shells. The pass policy: **every
-non-skipped cell must PASS and every mutation must be caught (39/39 at the v3.1.1 tag)**; the only permitted skips are
+fake `grok` on sh/bash/zsh (no real grok, no network), 76 scenarios × 3 shells. The pass policy: **every
+non-skipped cell must PASS and every mutation must be caught (41/41 at the v3.1.1 tag)**; the only permitted skips are
 documented ones — (a) the two normal/nonzero descendant-reaping scenarios (that cleanup is intentionally
 NOT provided on any shell; only signal/timeout reaping, while grok is alive, is guaranteed), and (b) a
 publish-time signal scenario ONLY when it observes the local `.grokpub.*` temp window described below.

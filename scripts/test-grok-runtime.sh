@@ -59,10 +59,25 @@ done
 # The auth-grant bounds are DUPLICATED per helper, so a scenario suite that drives only grok_relay
 # cannot see one deleted from grok_media. Require each bound EXACTLY TWICE (once per helper): that
 # closes the whole media-only-deletion class structurally, for every bound, without a scenario each.
-for anchor in 'profiles.relayauth' 'contains your home directory' 'is a git repository' 'does not hold' 'newline in auth path' 'sandbox metacharacter' 'leading/trailing whitespace' '-ef "$ap"' 'TOML-unsafe character in auth dir' 'auth directory not readable' 'is not the directory'; do
+for anchor in 'profiles.relayauth' 'contains your home directory' 'is a git repository' 'does not hold' 'newline in auth path' 'sandbox metacharacter' 'leading/trailing whitespace' '-ef "$ap"' 'TOML-unsafe character in auth dir' 'auth directory not readable' 'is not the directory' 'control character'; do
   _n=$(grep -c -- "$anchor" "$PRISTINE")
   [ "$_n" = 2 ] || { echo "FATAL: auth-grant bound must appear once per helper (2 total), found $_n: $anchor" >&2; exit 2; }
 done
+# Counting anchor TEXT catches a deleted bound but not one WEAKENED in place (an `exit 1` turned into
+# `true`, or a comment carrying the anchor text). So compare the two guard blocks byte-for-byte with the
+# helper name normalised: any divergence between the relay and media copies -- deletion, weakening, or a
+# fix landing in only one of them -- is a hard failure, for every bound, including ones added later.
+_bounds_block() { awk -v fn="$1" '
+    $0 ~ ("^" fn "\\(\\) \\($") { inh = 1; next }
+    inh && /# subscription on grok 1.0.x/ { inb = 1 }
+    inb { line = $0; gsub(/grok_relay|grok_media/, "HELPER", line); print line }
+    inb && /sandbox profile incomplete/ { exit }
+  ' "$PRISTINE"; }
+_bounds_block grok_relay > "$WORK/bounds.relay"; _bounds_block grok_media > "$WORK/bounds.media"
+[ -s "$WORK/bounds.relay" ] && [ -s "$WORK/bounds.media" ] || { echo "FATAL: could not extract the auth-grant bounds block from both helpers" >&2; exit 2; }
+cmp -s "$WORK/bounds.relay" "$WORK/bounds.media" || {
+  echo "FATAL: the auth-grant bounds block differs between grok_relay and grok_media:" >&2
+  diff "$WORK/bounds.relay" "$WORK/bounds.media" >&2; exit 2; }
 
 # --------------------------------------------------------------------------- generate fake grok
 cat > "$FAKEBIN/grok.tmpl" <<'FAKE_EOF'
@@ -503,6 +518,32 @@ authdir_dir_identity)
   [ "$rc" = 1 ] || fail "expected fail-closed exit 1, got $rc"
   grep -q 'is not the directory' "$run/err" || fail "no directory-identity message: [$(cat "$run/err")]"
   fake_ran && fail "SECURITY: a same-inode alias let the wrong directory be granted"
+  ok ;;
+
+authdir_control_char)
+  # a symlink into a directory whose NAME contains a mid-string LF: the raw path is newline-free, both
+  # identity checks legitimately pass (the resolved dir IS the credential's parent), and the LF would
+  # land inside the TOML basic string. Must be refused before grok starts.
+  setup_home; nl='
+'
+  mkdir -p "$run/re${nl}al"; cp "$realhome/.grok/auth.json" "$run/re${nl}al/auth.json"
+  ln -s "$run/re${nl}al" "$run/clink" || fail "symlink"
+  export GROK_AUTH_PATH="$run/clink/auth.json"
+  grok_relay "q" >/dev/null 2>"$run/err"; rc=$?
+  [ "$rc" = 1 ] || fail "expected fail-closed exit 1, got $rc"
+  grep -q 'control character' "$run/err" || fail "no control-char message: [$(cat "$run/err")]"
+  fake_ran && fail "SECURITY: a control character reached sandbox.toml and grok was started"
+  ok ;;
+
+authdir_whitespace_refuse)
+  # grok skips a read_write entry with leading/trailing whitespace, which would leave the credential
+  # ungranted; refuse instead of shipping a profile that silently does nothing
+  setup_home; mkdir -p "$run/ws "; cp "$realhome/.grok/auth.json" "$run/ws /auth.json"
+  export GROK_AUTH_PATH="$run/ws /auth.json"
+  grok_relay "q" >/dev/null 2>"$run/err"; rc=$?
+  [ "$rc" = 1 ] || fail "expected fail-closed exit 1, got $rc"
+  grep -q 'whitespace' "$run/err" || fail "no whitespace message: [$(cat "$run/err")]"
+  fake_ran && fail "SECURITY: grok ran with a grant entry it would silently skip"
   ok ;;
 
 authdir_bare_repo_refuse)
@@ -1009,7 +1050,7 @@ descendant_normal_exit descendant_nonzero_exit publish_sig_int publish_sig_term 
 media_timeout newline_failclosed artifact_spacename concurrent_rollback_isolation nohl_failclosed rollback_preserves_preexisting concurrent_reverse_timing \
 newline_output_dir dash_pgid_safety \
 sandbox_profile_sub sandbox_profile_apikey authdir_home_refuse authdir_repo_refuse authdir_symlink_escape authdir_toml_unsafe \
-sandbox_profile_media authdir_home_media_refuse authdir_newline_path authdir_resolve_mismatch authdir_resolve_decoy authdir_dir_identity authdir_bare_repo_refuse authdir_glob_refuse"
+sandbox_profile_media authdir_home_media_refuse authdir_newline_path authdir_resolve_mismatch authdir_resolve_decoy authdir_dir_identity authdir_control_char authdir_whitespace_refuse authdir_bare_repo_refuse authdir_glob_refuse"
 
 echo "=================================================================================="
 echo " grok_relay / grok_media — RUNTIME isolation proof (M6, fake grok, no network)"
@@ -1038,7 +1079,13 @@ MUTSHELL=""; for e in $SHELLS; do case "$e" in bash:*) MUTSHELL=${e#*:} ;; esac;
 MUTFAILS=0
 run_mut() {
   _id=$1; _desc=$2; _scn=$3; _prog=$4; _mut="$WORK/helpers.mut.$_id.sh"
-  sed "$_prog" "$PRISTINE" > "$_mut"
+  # A mutation that never applied is a HARNESS failure, not a caught mutation. Without these two
+  # guards a broken sed program yields an EMPTY file, `sh -n` accepts it (an empty script is valid),
+  # the scenario then fails because the helper is undefined, and the miss is scored as a catch.
+  if ! sed "$_prog" "$PRISTINE" > "$_mut" 2>"$WORK/sederr.$_id"; then
+    printf '%s|%s|%s|MUT-SED-ERR|%s\n' "$_id" "$_desc" "$_scn" "$(head -1 "$WORK/sederr.$_id" 2>/dev/null)" >> "$MUTLOG"; MUTFAILS=$((MUTFAILS+1)); return; fi
+  if [ ! -s "$_mut" ] || cmp -s "$_mut" "$PRISTINE"; then
+    printf '%s|%s|%s|MUT-NOT-APPLIED|sed changed nothing (or emptied the file)\n' "$_id" "$_desc" "$_scn" >> "$MUTLOG"; MUTFAILS=$((MUTFAILS+1)); return; fi
   if ! sh -n "$_mut" 2>/dev/null; then printf '%s|%s|%s|MUT-SYNTAX-ERR|-\n' "$_id" "$_desc" "$_scn" >> "$MUTLOG"; MUTFAILS=$((MUTFAILS+1)); return; fi
   _o=$(run_case "$MUTSHELL" "$_scn" "$_mut"); _red=$?
   run_case "$MUTSHELL" "$_scn" "$PRISTINE" >/dev/null 2>&1; _green=$?
@@ -1079,13 +1126,15 @@ if [ -n "$MUTSHELL" ]; then
   run_mut AF "subscription falls back to builtin strict"   sandbox_profile_sub    's/--sandbox relayauth/--sandbox strict/g'
   run_mut AG "grant widened from the auth dir to \$HOME"   sandbox_profile_sub    's#"$apd" > "$gkh/sandbox.toml"#"$HOME" > "$gkh/sandbox.toml"#g'
   run_mut AH "TOML-safety bound on the auth dir removed"   authdir_toml_unsafe    's#TOML-unsafe character in auth dir" >&2; exit 1#TOML-unsafe character in auth dir" >\&2; true#g'
-  run_mut AI "resolved-dir identity check removed"          authdir_resolve_mismatch 's#\[ "$apd/${ap##\*/}" -ef "$ap" \]#true#g'
-  run_mut AN "identity check weakened to mere readability"  authdir_resolve_decoy    's#\[ "$apd/${ap##\*/}" -ef "$ap" \]#[ -r "$apd/${ap##*/}" ]#g'
+  run_mut AI "resolved-dir identity check removed"          authdir_resolve_mismatch 's@\[ "$apd/${ap##\*/}" -ef "$ap" \]@true@g'
+  run_mut AN "identity check weakened to mere readability"  authdir_resolve_decoy    's@\[ "$apd/${ap##\*/}" -ef "$ap" \]@[ -r "$apd/${ap##*/}" ]@g'
   run_mut AO "directory-identity bound removed"            authdir_dir_identity   's#\[ "$apd" -ef "$(dirname "$ap")" \]#true#g'
+  run_mut AP "control-character bound deleted"             authdir_control_char   '/\[\[:cntrl:\]\]/d'
+  run_mut AQ "edge-whitespace bound deleted"               authdir_whitespace_refuse '/leading.trailing whitespace/d'
   run_mut AJ "bare-repository bound removed"               authdir_bare_repo_refuse 's#\[ -d "$apd/objects" \]#false#g'
   run_mut AK "newline pre-check line deleted"              authdir_newline_path   '/# BEFORE resolving:/d'
   run_mut AL "glob/metacharacter bound removed"            authdir_glob_refuse    's#skips any other glob entry; refusing" >&2; exit 1#skips any other glob entry; refusing" >\&2; true#g'
-  run_mut AM "profile written on the API-key branch too"   sandbox_profile_apikey 's#if \[ -z "$key" \]; then                                     # subscription on grok 1.0.x#if true; then                                     # subscription on grok 1.0.x#g'
+  run_mut AM "profile written on the API-key branch too"   sandbox_profile_apikey 's@if \[ -z "$key" \]; then                                     # subscription on grok 1.0.x@if true; then                                     # subscription on grok 1.0.x@g'
 fi
 
 # --------------------------------------------------------------------------------- reporting
