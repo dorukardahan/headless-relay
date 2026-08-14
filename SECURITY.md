@@ -9,7 +9,7 @@ wire capture. On **2026-07-15 xAI open-sourced Grok Build** (Apache-2.0,
 default. A source audit of that release (commit `c68e39f`) found the **whole-repo bundle path is
 gone from the source**, the remaining trace-upload defaults **off**, and your **local
 `~/.grok/config.toml` beats xAI's remote settings**. Two residual concerns remain, so headless-relay
-(v3.0.0) still routes Grok through two small helpers: they run `grok` under a **hermetic child
+(v3.0.0+) still routes Grok through two small helpers: they run `grok` under a **hermetic child
 environment** (`env -i` allowlist — only a handful of vars reach grok, dropping your other secrets and
 grok's own endpoint / auth-provider-command / log / compat overrides) with an **empty synthetic
 `HOME`** AND a **clean temporary `GROK_HOME`** (so it reads neither your `~/.claude` / `~/.cursor` /
@@ -148,9 +148,16 @@ the `~/.grok/AGENTS.md` + `~/.claude` global-rule leak reproduced on every call 
 clean `GROK_HOME` + synthetic `HOME`, and `--deny '*'` refused a forced tool call. The open-sourced
 code now explains each of those observations.
 
+A later check on the shipped 1.0.x line (grok 1.0.0, 2026-08-08; behavior unchanged on 1.0.3): the
+`[compat.*]` config cells now cover plugin-delivered skills too — with all 18 cells `false`,
+`grok inspect --debug` marks every `[claude]`-tagged item `[disabled]`, closing the 0.2.99-era gap
+where plugin-delivered skills slipped past `compat.claude.skills=false`. The helpers never relied on
+those cells (they isolate via a clean `GROK_HOME` + synthetic `HOME` regardless), but it matters for
+anyone hardening their real `~/.grok/config.toml` against the raw-grok compat scan.
+
 ---
 
-## 5. What headless-relay does about it (v3.0.0)
+## 5. What headless-relay does about it (v3.0.0+)
 
 Every Grok call goes through one of two small helper functions (`grok_relay` for text, `grok_media`
 for image/video) defined in SKILL.md. v3.0.0 keeps Grok isolated with layered controls, and — unlike
@@ -218,7 +225,11 @@ a key can't be traced onto stderr) and cleanup `trap`s on EXIT / INT / TERM / HU
   tools to read a repo and no repo in the working dir to bundle. `grok_media` swaps that for a
   media-only `--tools image_gen,image_edit,image_to_video,reference_to_video` allow-list plus
   `--disallowed-tools search_tool,use_tool` to strip the always-on MCP meta-tools (binary-observed:
-  `image_gen` still runs). `--disable-web-search` and a best-effort `--sandbox strict` are kept on both.
+  `image_gen` still runs). `--disable-web-search` and a best-effort seatbelt are kept on both — since
+  v3.1.0 the subscription branch ships a `relayauth` profile into the temp `GROK_HOME`
+  (`extends = "strict"` plus `read_write` on ONLY the real auth directory), because the grok 1.0.x
+  seatbelt is kernel-enforced and plain `strict` denies reading `GROK_AUTH_PATH` outside the sandbox;
+  the API-key branch stays on plain `strict`. An unappliable profile makes grok refuse to start.
 - **Media published atomically, never written in place.** `grok_media` never runs grok in your output
   dir. grok writes media under the temp `GROK_HOME` session dir (`paths.rs` `sessions_cwd_dir` =
   `grok_home()/sessions/…`); the helper then publishes only THIS call's artifacts by copying each into

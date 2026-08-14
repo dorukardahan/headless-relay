@@ -132,5 +132,10 @@ on a merely-expired cached token while still listing models in the same output; 
 wire-test drove the v2.0.0 Grok isolation policy, see [SECURITY.md](SECURITY.md)), then
 re-assessed again 2026-07-15 after xAI open-sourced Grok Build — a source audit of the released
 code (commit `c68e39f`) found the whole-repo bundle path gone, see [SECURITY.md](SECURITY.md);
-the Gemini lane was verified 2026-07-08 on Antigravity agy 1.1.0. CLIs drift fast, so re-verify
+the Gemini lane was verified 2026-07-08 on Antigravity agy 1.1.0. A 2026-08-14 refresh: the Grok
+lane re-verified on grok 1.0.3 — grok-4.6 became the CLI default 2026-08-12 and the helpers now
+pin `-m grok-4.6` (all helper flags intact, live relay smoke green); the GLM lane re-verified on
+GLM-5.3 (`zai-coding-plan/glm-5.3`, launched that day, smoke-verified via opencode; the ZCode app
+still pins glm-5.2 in its own config); and the Claude lane verified headless with Opus 5
+(`claude -p --model claude-opus-5`). CLIs drift fast, so re-verify
 flags when something errors.

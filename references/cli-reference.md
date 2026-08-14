@@ -7,7 +7,7 @@ binaries: opencode 1.14.31, claude (Claude Code) 2.1.198, zcode CLI 0.15.0 (ZCod
 then re-assessed 2026-07-15 after xAI open-sourced Grok Build (source audit of commit
 `c68e39f`) — the whole-repo bundle is gone from source; the residuals are the two-root
 global-rule leak (Claude/Cursor compat from `$HOME` + grok's own `~/.grok/AGENTS.md`) and the
-unverifiable shipped binary; Antigravity section verified
+unverifiable shipped binary, then re-verified 2026-08-14 on grok 1.0.3 (grok-4.6 became the CLI default 2026-08-12; all helper flags intact, live relay smoke green); Antigravity section verified
 2026-07-08 on agy 1.1.0. Flags drift — re-check `--help` when a command errors with
 `unexpected argument`.
 
@@ -93,7 +93,7 @@ or stdin pipe both work.
 
 | Flag | Meaning |
 |------|---------|
-| `-m, --model <provider/model>` | e.g. `zai-coding-plan/glm-5.2`. |
+| `-m, --model <provider/model>` | e.g. `zai-coding-plan/glm-5.3`. |
 | `--variant <name>` | Provider reasoning effort: `minimal`, `high`, `max`. Z.ai recommends `max` for coding. |
 | `--format <default\|json>` | `json` emits raw JSON events. |
 | `-c, --continue` | Continue the last session. |
@@ -104,9 +104,14 @@ or stdin pipe both work.
 | `--thinking` | Show thinking blocks. |
 | `--dangerously-skip-permissions` | Auto-approve permissions not explicitly denied. |
 
-Model id note: in OpenCode use the bare `zai-coding-plan/glm-5.2`. The `[1m]` suffix is the
+Model id note: in OpenCode use the bare `zai-coding-plan/glm-5.3`. The `[1m]` suffix is the
 Anthropic-endpoint convention used by other tools and does not apply here; review-sized prompts
 sit under the default context anyway.
+
+GLM-5.3 (launched 2026-08-14; same 743B base as 5.2, gains from scaled post-training) is live
+on the Coding Plan — `zai-coding-plan/glm-5.3` smoke-verified via `opencode run` the same day.
+Heads-up for API users: the new endpoint no longer allows disabling thinking (efforts are
+low/high/max only) — a breaking change for apps that ran with thinking off.
 
 Do not use `-f`/`--file` for prompt attachment in scripts — it has misbehaved on prior
 versions. Pipe on stdin instead. For repeated calls, start `opencode serve` once and attach:
@@ -142,7 +147,10 @@ Because `zcode login` is broken, configure the CLI manually. All three recipes b
 live-verified end-to-end on CLI 0.15.0.
 
 **Recipe A — persistent config file (recommended).** Write `~/.zcode/cli/config.json` in
-exactly the shape the (broken) login flow would have written, then `chmod 600` it:
+exactly the shape the (broken) login flow would have written, then `chmod 600` it
+(model note, 2026-08-14: the ZCode app still pins `zai/glm-5.2` in its own config and the
+recipes below mirror that; GLM-5.3 is live via OpenCode — bump `model.main` to `zai/glm-5.3`
+once the app exposes it):
 
 ```json
 {
@@ -323,15 +331,18 @@ grokbin=$(command -v grok)                             # env -i uses a minimal P
 printf '[features]\ntelemetry = false\n[telemetry]\ntrace_upload = false\n[folder_trust]\nenabled = false\n[harness]\ndisable_codebase_upload = true\n[compat.claude]\nskills = false\nrules = false\nagents = false\nmcps = false\nhooks = false\nsessions = false\n[compat.cursor]\nskills = false\nrules = false\nagents = false\nmcps = false\nhooks = false\nsessions = false\n[compat.codex]\nskills = false\nrules = false\nagents = false\nmcps = false\nhooks = false\nsessions = false\n' > "$gh/config.toml"
 # HERMETIC: env -i is an ALLOWLIST — only these vars reach grok; EVERYTHING else (your other secrets
 # AND grok's endpoint/proxy/auth-provider-command/log/managed-config/compat overrides) is dropped.
+# grok 1.0.x seatbelt denies reading $ap outside the sandbox — ship a profile extending strict
+# with read/write on ONLY the auth dir (an unappliable profile makes grok refuse to start):
+printf '[profiles.relayauth]\nextends = "strict"\nread_write = ["%s"]\n' "$(dirname "$ap")" > "$gh/sandbox.toml"
 ( cd "$iso" && env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin HOME="$gh" GROK_HOME="$gh" TMPDIR="$gh" TERM=dumb \
     GROK_TELEMETRY_ENABLED=false GROK_TELEMETRY_TRACE_UPLOAD=false GROK_EXTERNAL_OTEL=false GROK_AUTH_PATH="$ap" \
-    "$grokbin" -p "…" -m grok-4.5 --disable-web-search --sandbox strict --deny '*' )
+    "$grokbin" -p "…" -m grok-4.6 --disable-web-search --sandbox relayauth --deny '*' )
 rm -rf "$gh" "$iso"
 ```
 
 `--deny '*'` is the load-bearing tool block — binary-observed on 0.2.99 to actually refuse tool calls
 (forcing one produced `Denied by permission policy`) and it already covers `web_search`. `grok_relay`
-additionally keeps `--disable-web-search` and a best-effort `--sandbox strict` as cheap extra layers
+additionally keeps `--disable-web-search` and a best-effort seatbelt (`--sandbox relayauth` on subscription auth — strict extended with read/write on only the auth dir, written into the temp `GROK_HOME`; plain `strict` on the API-key branch) as cheap extra layers
 (the sandbox fails open for built-in profiles — an inapplicable profile warns and continues
 unenforced rather than refusing to start — so it is not relied on). `--deny '*'` also blocks
 `image_gen`/`image_edit`, which is why `grok_media` swaps it for a `--tools` allow-list of just the
@@ -362,10 +373,11 @@ from source. Provenance is mixed — labels below; verify per version:
 
 See the helper definitions and kill-switch notes in `SKILL.md`.
 
-Headless via `-p`. Use `-m grok-4.5` — xAI's coding/agents frontier model (launched
-2026-07-08, trained with Cursor; 500K context; reasoning-effort supported, default `high`).
-It is the CLI default on 0.2.91, but pass `-m` explicitly anyway: defaults drift, and the
-alternative `grok-composer-2.5-fast` (Cursor's fast coding model) is a lighter tier. The
+Headless via `-p`. Use `-m grok-4.6` — xAI's coding/agents frontier model (launched
+2026-08-12; 500K context; $2/$6 per 1M tokens; a 2x-price faster variant also exists).
+It is the CLI default since 2026-08-12 (verified on grok 1.0.3), but pass `-m` explicitly
+anyway: defaults drift. `grok-4.5` (2026-07-08, trained with Cursor) is still served, and
+the alternative `grok-composer-2.5-fast` (Cursor's fast coding model) is a lighter tier. The
 former `grok-build` model id was RETIRED from the CLI at the 4.5 launch and now fails with
 `unknown model id`; the separate `grok-build-0.1` survives only on the metered Code API, not
 as a CLI model.
@@ -375,10 +387,11 @@ as a CLI model.
 | `-p, --single <PROMPT>` | Single-turn prompt to stdout, then exit. |
 | `--prompt-file <PATH>` | Single-turn prompt from a file. |
 | `--prompt-json <JSON>` | Prompt as JSON content blocks. |
-| `-m, --model <MODEL>` | Model id, e.g. `grok-4.5`. |
+| `-m, --model <MODEL>` | Model id, e.g. `grok-4.6`. |
+| `--sandbox <PROFILE>` | Seatbelt profile: builtin `strict` / `workspace`, or custom from `$GROK_HOME/sandbox.toml` (`[profiles.X]` with `extends` + `read_only` / `read_write` DIRECTORY lists). 1.0.x change: kernel-enforced — `strict` denies file reads outside cwd / `GROK_HOME` / `TMPDIR`, so subscription auth via an outside `GROK_AUTH_PATH` fails with "Not signed in"; the helpers ship `relayauth` (strict + read_write on only the auth dir). An unappliable profile makes grok refuse to start (fail closed). |
 | `--output-format <FMT>` | `plain` (default), `json`, `streaming-json`. |
 | `--disable-web-search` | Disable web search + fetch. Mandatory for diff-deterministic review. |
-| `--effort <LEVEL>` | `low\|medium\|high\|xhigh\|max`. `--reasoning-effort` also exists. grok-4.5 supports reasoning effort (model default `high`; `--effort high` live-verified). |
+| `--effort <LEVEL>` | `low\|medium\|high\|xhigh\|max`. `--reasoning-effort` also exists. reasoning effort supported (model default `high`; `--effort high` live-verified on grok-4.5 at its launch). |
 | `--best-of-n <N>` | Run the task N ways in parallel, pick the best (headless only). |
 | `--check` | Append a self-verification loop to the prompt (headless only). |
 | `-r, --resume [id]` / `-c, --continue` | Resume by id / most recent. |
@@ -403,9 +416,10 @@ gh=$(mktemp -d "${TMPDIR:-/tmp}/grok-home.XXXXXX")
 iso=$(mktemp -d "${TMPDIR:-/tmp}/grok-iso.XXXXXX")
 ap="${GROK_AUTH_PATH:-${GROK_HOME:-$HOME/.grok}/auth.json}"
 grokbin=$(command -v grok)
+printf '[profiles.relayauth]\nextends = "strict"\nread_write = ["%s"]\n' "$(dirname "$ap")" > "$gh/sandbox.toml"
 ( cd "$iso" && env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin HOME="$gh" GROK_HOME="$gh" TMPDIR="$gh" TERM=dumb \
     GROK_TELEMETRY_ENABLED=false GROK_TELEMETRY_TRACE_UPLOAD=false GROK_EXTERNAL_OTEL=false GROK_AUTH_PATH="$ap" \
-    RUST_LOG=debug "$grokbin" -p "test" -m grok-4.5 --disable-web-search --sandbox strict --deny '*' 2>/tmp/grok-debug.log ) &
+    RUST_LOG=debug "$grokbin" -p "test" -m grok-4.6 --disable-web-search --sandbox relayauth --deny '*' 2>/tmp/grok-debug.log ) &
 GROK_PID=$!; sleep 75; grep -c errorcode_502 /tmp/grok-debug.log; kill "$GROK_PID" 2>/dev/null
 rm -rf "$gh" "$iso"
 ```
@@ -483,10 +497,11 @@ Walk this ladder in order and stop at the first verdict:
    iso=$(mktemp -d "${TMPDIR:-/tmp}/grok-iso.XXXXXX")
    ap="${GROK_AUTH_PATH:-${GROK_HOME:-$HOME/.grok}/auth.json}"
    grokbin=$(command -v grok)
+   printf '[profiles.relayauth]\nextends = "strict"\nread_write = ["%s"]\n' "$(dirname "$ap")" > "$gh/sandbox.toml"
    ( cd "$iso" && env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin HOME="$gh" GROK_HOME="$gh" TMPDIR="$gh" TERM=dumb \
        GROK_TELEMETRY_ENABLED=false GROK_TELEMETRY_TRACE_UPLOAD=false GROK_EXTERNAL_OTEL=false GROK_AUTH_PATH="$ap" \
        perl -e 'alarm shift; exec @ARGV' 120 \
-       "$grokbin" -p "Reply with exactly GROK_OK and nothing else." -m grok-4.5 --disable-web-search --sandbox strict --deny '*' ); rc=$?
+       "$grokbin" -p "Reply with exactly GROK_OK and nothing else." -m grok-4.6 --disable-web-search --sandbox relayauth --deny '*' ); rc=$?
    rm -rf "$gh" "$iso"
    ```
 
@@ -755,9 +770,9 @@ structured output for the precise reason. When capturing a piped tool's exit thr
 | Grok stderr noise: `AuthorizationRequired`, `Skipping MCP tool` (stdout still arrives) | Cosmetic startup noise + digit-prefixed MCP tool names | Pipe `2>/dev/null` |
 | Grok `-p` hangs 2+ min, no stdout (stderr may show `worker quit with fatal … Auth(AuthorizationRequired)`, or nothing) | Provider-side 502 from `cli-chat-proxy.grok.com` (CLI swallows it), or a stale cached token | Run the `RUST_LOG=debug` diagnosis in the Grok section: 502s in the log = provider outage, skip Grok and retry later; no 502s + fatal auth line = `grok login` + one retry. Wrap unattended calls in a timeout |
 | Grok surfaces unrelated tweets/blogs as "evidence" | Web search left on | Add `--disable-web-search` |
-| Grok: `Couldn't set model 'grok-build': Invalid params: "unknown model id"` | `grok-build` retired from the CLI at the grok-4.5 launch (2026-07-08) | Use `-m grok-4.5` |
+| Grok: `Couldn't set model 'grok-build': Invalid params: "unknown model id"` | `grok-build` retired from the CLI at the grok-4.5 launch (2026-07-08) | Use a current id, e.g. `-m grok-4.6` |
 | Grok: `grok models` prints "You are not authenticated." though login should be fine | Header mirrors an expired cached access token read at process start; the same call then refreshes and fetches the catalog (routine after idle) | If a model list appears below the header → **available**, use the lane. Only "not authenticated" with NO model list is real: auth.json present → one bounded real call decides; auth.json absent → `grok login`. Match on `Available models:` / `Default model:`, not the header. `--yolo` / `--always-approve` are permission flags, never the fix |
-| Grok answer seems shallow | A lighter model (e.g. `grok-composer-2.5-fast`) was selected | Pass `-m grok-4.5` explicitly |
+| Grok answer seems shallow | A lighter model (e.g. `grok-composer-2.5-fast`) was selected | Pass `-m grok-4.6` explicitly |
 | OpenCode `-f` file attach errors | Known `-f` issue on some versions | Pipe the prompt on stdin instead |
 | zcode: `Model config is missing. Create ~/.zcode/cli/config.json …` | No CLI config and no env vars | Apply Recipe A, B, or C above |
 | zcode config written but `model: Invalid input` in `~/.zcode/cli/log/` | `model.main` written as an object or bad ref | `model.main` must be a `provider/model` STRING, e.g. `"zai/glm-5.2"` |

@@ -28,7 +28,7 @@
 #        - a tool restriction       (`--deny` OR a `--tools` allow-list);
 #        - an auth mechanism        (`GROK_AUTH_PATH=` OR `XAI_API_KEY=`).
 # Relay calls are matched POSITIVELY by their relay flag, so `command -v grok`, `grok login`, a "grok
-# not found" string, the model id `grok-4.5`, and catalog calls (`grok models`/`agent`/`inspect`) are
+# not found" string, a bare model id (e.g. `grok-4.6`), and catalog calls (`grok models`/`agent`/`inspect`) are
 # NOT counted and need nothing. Helper INVOCATIONS (`grok_relay "…"`, `grok_media …`) are not raw calls.
 # Counting is per-block and layer-independent (a flag/assignment may sit on a line-continuation).
 #
@@ -72,7 +72,7 @@ for f in "SKILL.md" "references/cli-reference.md"; do
     /^[[:space:]]*```/ {
       if (inb) {
         # Relay calls: a grok / "$grokbin" token immediately followed by a relay (model-turn) flag.
-        # This positively excludes `command -v grok`, `grok login`, "grok not found", `grok-4.5`,
+        # This positively excludes `command -v grok`, `grok login`, "grok not found", bare model ids,
         # and catalog `grok models`/`agent`/`inspect` (none are followed by a relay flag).
         t0 = code
         nrelay = gsub(/(grok|grokbin")[ ]+(-p|--prompt-file|--prompt-json|--single|--check|--resume|--continue|-r|-c)([ "]|$)/, "&", t0)
