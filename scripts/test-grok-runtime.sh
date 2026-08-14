@@ -53,7 +53,7 @@ if [ "$_hr" != 1 ] || [ "$_hm" != 1 ]; then
   echo "FATAL: could not extract exactly one grok_relay and one grok_media (relay=$_hr media=$_hm)" >&2; exit 2
 fi
 sh -n "$PRISTINE" 2>"$WORK/synerr" || { echo "FATAL: extracted helpers do not parse: $(cat "$WORK/synerr")" >&2; exit 2; }
-for anchor in 'env -i' '\-\-deny' 'image_gen' 'GROK_AUTH_PATH' 'mktemp -d' 'trap ' 'set +eux' 'ln "$curtmp"' 'NO-HARDLINK-FAILCLOSED' 'manifest0' 'pending=' 'sbxreal' '_reappg' 'pgok' 'ps -o pgid=' 'case "$brief$out"' 'pwd -P' '_rollback' 'could not write config' '_ingit' 'profiles.relayauth' 'contains your home directory' 'is a git repository root'; do
+for anchor in 'env -i' '\-\-deny' 'image_gen' 'GROK_AUTH_PATH' 'mktemp -d' 'trap ' 'set +eux' 'ln "$curtmp"' 'NO-HARDLINK-FAILCLOSED' 'manifest0' 'pending=' 'sbxreal' '_reappg' 'pgok' 'ps -o pgid=' 'case "$brief$out"' 'pwd -P' '_rollback' 'could not write config' '_ingit' 'profiles.relayauth' 'contains your home directory' 'is a git repository' 'does not hold' 'newline in auth path' 'sandbox metacharacter'; do
   grep -q "$anchor" "$PRISTINE" || { echo "FATAL: extracted helpers missing anchor: $anchor" >&2; exit 2; }
 done
 
@@ -388,7 +388,7 @@ authdir_repo_refuse)
   cp "$realhome/.grok/auth.json" "$run/authrepo/auth.json"; export GROK_AUTH_PATH="$run/authrepo/auth.json"
   grok_relay "q" >/dev/null 2>"$run/err"; rc=$?
   [ "$rc" = 1 ] || fail "expected fail-closed exit 1, got $rc"
-  grep -q 'git repository root' "$run/err" || fail "no repo-root message: [$(cat "$run/err")]"
+  grep -q 'git repository' "$run/err" || fail "no repo message: [$(cat "$run/err")]"
   fake_ran && fail "SECURITY: grok ran with a repository granted"
   ok ;;
 
@@ -399,6 +399,7 @@ authdir_symlink_escape)
   export GROK_AUTH_PATH="$run/homelink/auth.json"
   grok_relay "q" >/dev/null 2>"$run/err"; rc=$?
   [ "$rc" = 1 ] || fail "expected fail-closed exit 1 (symlink resolves to \$HOME), got $rc"
+  grep -q 'contains your home directory' "$run/err" || fail "no bounds message: [$(cat "$run/err")]"
   fake_ran && fail "SECURITY: a symlinked auth dir smuggled a home-wide grant past the bounds"
   ok ;;
 
@@ -410,6 +411,80 @@ authdir_toml_unsafe)
   [ "$rc" = 1 ] || fail "expected fail-closed exit 1, got $rc"
   grep -q 'TOML-unsafe' "$run/err" || fail "no TOML-safety message: [$(cat "$run/err")]"
   fake_ran && fail "SECURITY: grok ran with an injectable auth dir"
+  ok ;;
+
+sandbox_profile_media)
+  # the media helper carries the SAME bounded profile (mutations edit both bodies, so relay-only
+  # coverage would let a media-only regression pass unseen)
+  setup_home; mkdir -p "$run/adir"; cp "$realhome/.grok/auth.json" "$run/adir/auth.json"; export GROK_AUTH_PATH="$run/adir/auth.json"
+  want=$(cd "$run/adir" && pwd -P)
+  grok_media "$(mkbrief image)" "$run/out" >/dev/null 2>"$run/err"; rc=$?
+  [ "$rc" = 0 ] || fail "rc=$rc err=[$(cat "$run/err")]"
+  awk '/^ARGV_BEGIN$/{f=1;next} /^ARGV_END$/{f=0} f' "$(E)" > "$run/argv"
+  grep -qx -- 'relayauth' "$run/argv" || fail "media subscription: --sandbox relayauth absent"
+  [ "$(lg SBX_PRESENT)" = yes ] || fail "media: sandbox.toml not written"
+  [ "$(lg SBX_GRANT)" = "$want" ] || fail "media GRANT WIDENED: got [$(lg SBX_GRANT)] want [$want]"
+  [ "$(lg SBX_ENTRIES)" = 1 ] || fail "media GRANT WIDENED: expected 1 entry, got $(lg SBX_ENTRIES)"
+  ok ;;
+
+authdir_home_media_refuse)
+  # the bounds must hold in the media helper too
+  setup_home; cp "$realhome/.grok/auth.json" "$realhome/auth.json"; export GROK_AUTH_PATH="$realhome/auth.json"
+  grok_media "$(mkbrief image)" "$run/out" >/dev/null 2>"$run/err"; rc=$?
+  [ "$rc" = 1 ] || fail "expected fail-closed exit 1, got $rc"
+  grep -q 'contains your home directory' "$run/err" || fail "no bounds message: [$(cat "$run/err")]"
+  fake_ran && fail "SECURITY: media ran with a home-wide grant"
+  ok ;;
+
+authdir_newline_path)
+  # command substitution strips trailing newlines: a newline-named auth dir would otherwise resolve to
+  # its newline-free SIBLING and grant that instead. Must be refused BEFORE resolution.
+  setup_home; nl='
+'
+  mkdir -p "$run/sib" "$run/sib$nl"
+  cp "$realhome/.grok/auth.json" "$run/sib/auth.json"          # the sibling that stripping would land on
+  cp "$realhome/.grok/auth.json" "$run/sib$nl/auth.json"
+  export GROK_AUTH_PATH="$run/sib$nl/auth.json"
+  grok_relay "q" >/dev/null 2>"$run/err"; rc=$?
+  [ "$rc" = 1 ] || fail "expected fail-closed exit 1, got $rc"
+  grep -q 'newline in auth path' "$run/err" || fail "no newline message: [$(cat "$run/err")]"
+  fake_ran && fail "SECURITY: a newline-named auth dir granted its sibling"
+  ok ;;
+
+authdir_resolve_mismatch)
+  # $ap itself is newline-free, but it points through a symlink into a newline-named dir, so the
+  # RESOLVED path loses the newline. The grant must not survive that: the resolved dir has to hold
+  # the credential.
+  setup_home; nl='
+'
+  mkdir -p "$run/real$nl"; cp "$realhome/.grok/auth.json" "$run/real$nl/auth.json"
+  ln -s "$run/real$nl" "$run/mlink" || fail "symlink"
+  export GROK_AUTH_PATH="$run/mlink/auth.json"
+  grok_relay "q" >/dev/null 2>"$run/err"; rc=$?
+  [ "$rc" = 1 ] || fail "expected fail-closed exit 1, got $rc"
+  grep -q 'does not hold' "$run/err" || fail "no resolution-invariant message: [$(cat "$run/err")]"
+  fake_ran && fail "SECURITY: granted a directory that does not hold the credential"
+  ok ;;
+
+authdir_bare_repo_refuse)
+  # a BARE repo has no .git entry — the repository bound must catch it anyway
+  setup_home; mkdir -p "$run/bare"; ( cd "$run/bare" && git init --bare -q ) || fail "git init --bare"
+  cp "$realhome/.grok/auth.json" "$run/bare/auth.json"; export GROK_AUTH_PATH="$run/bare/auth.json"
+  grok_relay "q" >/dev/null 2>"$run/err"; rc=$?
+  [ "$rc" = 1 ] || fail "expected fail-closed exit 1, got $rc"
+  grep -q 'git repository' "$run/err" || fail "no repository message: [$(cat "$run/err")]"
+  fake_ran && fail "SECURITY: grok ran with a bare repository granted"
+  ok ;;
+
+authdir_glob_refuse)
+  # grok reads a TRAILING /* or /** in read_write as the PARENT dir, so a dir literally named "*"
+  # inside $HOME would widen the grant one level and slip past the home bound. Refuse before writing.
+  setup_home; mkdir -p "$realhome/*"; cp "$realhome/.grok/auth.json" "$realhome/*/auth.json"
+  export GROK_AUTH_PATH="$realhome/*/auth.json"
+  grok_relay "q" >/dev/null 2>"$run/err"; rc=$?
+  [ "$rc" = 1 ] || fail "expected fail-closed exit 1, got $rc"
+  grep -q 'sandbox metacharacter' "$run/err" || fail "no glob message: [$(cat "$run/err")]"
+  fake_ran && fail "SECURITY: a glob-named auth dir widened the grant to its parent"
   ok ;;
 
 apikey_branch)
@@ -894,7 +969,8 @@ set_eu_success set_eu_usage sentinel_untouched spaces_metachars \
 descendant_normal_exit descendant_nonzero_exit publish_sig_int publish_sig_term publish_sig_hup \
 media_timeout newline_failclosed artifact_spacename concurrent_rollback_isolation nohl_failclosed rollback_preserves_preexisting concurrent_reverse_timing \
 newline_output_dir dash_pgid_safety \
-sandbox_profile_sub sandbox_profile_apikey authdir_home_refuse authdir_repo_refuse authdir_symlink_escape authdir_toml_unsafe"
+sandbox_profile_sub sandbox_profile_apikey authdir_home_refuse authdir_repo_refuse authdir_symlink_escape authdir_toml_unsafe \
+sandbox_profile_media authdir_home_media_refuse authdir_newline_path authdir_resolve_mismatch authdir_bare_repo_refuse authdir_glob_refuse"
 
 echo "=================================================================================="
 echo " grok_relay / grok_media — RUNTIME isolation proof (M6, fake grok, no network)"
@@ -964,6 +1040,11 @@ if [ -n "$MUTSHELL" ]; then
   run_mut AF "subscription falls back to builtin strict"   sandbox_profile_sub    's/--sandbox relayauth/--sandbox strict/g'
   run_mut AG "grant widened from the auth dir to \$HOME"   sandbox_profile_sub    's#"$apd" > "$gkh/sandbox.toml"#"$HOME" > "$gkh/sandbox.toml"#g'
   run_mut AH "TOML-safety bound on the auth dir removed"   authdir_toml_unsafe    's#TOML-unsafe character in auth dir" >&2; exit 1#TOML-unsafe character in auth dir" >\&2; true#g'
+  run_mut AI "resolved-dir-holds-the-credential check removed" authdir_resolve_mismatch 's#\[ -r "$apd/${ap##\*/}" \]#true#g'
+  run_mut AJ "bare-repository bound removed"               authdir_bare_repo_refuse 's#\[ -d "$apd/objects" \]#false#g'
+  run_mut AK "newline pre-check dropped (sibling grant via stripping)" authdir_newline_path 's#newline in auth path" >&2; exit 1#newline in auth path" >\&2; true#g'
+  run_mut AL "glob/metacharacter bound removed"            authdir_glob_refuse    's#sandbox metacharacter (\* ? \[) — grok reads a TRAILING#ZZNOMATCHZZ#g'
+  run_mut AM "profile written on the API-key branch too"   sandbox_profile_apikey 's#if \[ -z "$key" \]; then                                     # subscription on grok 1.0.x#if true; then                                     # subscription on grok 1.0.x#g'
 fi
 
 # --------------------------------------------------------------------------------- reporting

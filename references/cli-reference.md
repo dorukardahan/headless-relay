@@ -338,20 +338,29 @@ printf '[features]\ntelemetry = false\n[telemetry]\ntrace_upload = false\n[folde
 # unsafe to hand to a sandboxed process: /, your $HOME or any ancestor of it, a git repo root, or a
 # name that would break out of the TOML string. Resolve physically first so a symlinked or ../-laden
 # path cannot smuggle a broader grant past those bounds. (Same bounds as the shipped helpers.)
-relayauth_profile() {   # $1 = auth.json path, $2 = the temp GROK_HOME to write the profile into
-  _apd=$(cd "$(dirname "$1")" 2>/dev/null && pwd -P) || return 1
+relayauth_profile() (   # $1 = auth.json path, $2 = the temp GROK_HOME to write the profile into
+  # subshell body: no `local` in POSIX sh, so this keeps _apd/_hp out of the caller's namespace
+  [ -d "${2:-}" ] || exit 1
+  [ "$(printf '%s' "$1" | wc -l | tr -d ' ')" = 0 ] || exit 1
+  _apd=$(cd "$(dirname "$1")" 2>/dev/null && pwd -P) || exit 1
+  [ -r "$_apd/${1##*/}" ] || exit 1
   _hp=$(cd "$HOME" 2>/dev/null && pwd -P) || _hp=$HOME
-  [ "$_apd" = / ] && return 1
-  case "$_hp/" in "$_apd"/*) return 1 ;; esac
-  [ -e "$_apd/.git" ] && return 1
-  [ "$(printf '%s' "$_apd" | wc -l | tr -d ' ')" = 0 ] || return 1
-  case "$_apd" in *'"'*|*'\'*) return 1 ;; esac
-  printf '[profiles.relayauth]\nextends = "strict"\nread_write = ["%s"]\n' "$_apd" > "$2/sandbox.toml"
-}
-relayauth_profile "$ap" "$gh" || { echo "unsafe auth dir — refusing to grant it" >&2; return 1 2>/dev/null || exit 1; }
-( cd "$iso" && env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin HOME="$gh" GROK_HOME="$gh" TMPDIR="$gh" TERM=dumb \
-    GROK_TELEMETRY_ENABLED=false GROK_TELEMETRY_TRACE_UPLOAD=false GROK_EXTERNAL_OTEL=false GROK_AUTH_PATH="$ap" \
-    "$grokbin" -p "…" -m grok-4.6 --disable-web-search --sandbox relayauth --deny '*' )
+  [ "$_apd" = / ] && exit 1
+  case "$_hp/" in "${_apd%/}"/*) exit 1 ;; esac
+  { [ -e "$_apd/.git" ] || { [ -d "$_apd/objects" ] && [ -d "$_apd/refs" ] && [ -e "$_apd/HEAD" ]; }; } && exit 1
+  case "$_apd" in *'"'*|*'\'*) exit 1 ;; esac
+  case "$_apd" in *'*'*|*'?'*|*'['*) exit 1 ;; esac    # grok reads a trailing /* or /** as the PARENT dir; other globs are skipped
+  _tb=$(printf '\t'); case "$_apd" in ' '*|*' '|"$_tb"*|*"$_tb") exit 1 ;; esac
+  printf '[profiles.relayauth]\nextends = "strict"\nread_write = ["%s"]\n' "$_apd" > "$2/sandbox.toml" || exit 1
+  [ -s "$2/sandbox.toml" ]
+)
+if relayauth_profile "$ap" "$gh"; then
+  ( cd "$iso" && env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin HOME="$gh" GROK_HOME="$gh" TMPDIR="$gh" TERM=dumb \
+      GROK_TELEMETRY_ENABLED=false GROK_TELEMETRY_TRACE_UPLOAD=false GROK_EXTERNAL_OTEL=false GROK_AUTH_PATH="$ap" \
+      "$grokbin" -p "…" -m grok-4.6 --disable-web-search --sandbox relayauth --deny '*' )
+else
+  echo "unsafe auth dir — not starting grok" >&2   # never `exit` in a pasteable block: it would close an interactive shell
+fi
 rm -rf "$gh" "$iso"
 ```
 
@@ -407,7 +416,7 @@ as a CLI model.
 | `--prompt-file <PATH>` | Single-turn prompt from a file. |
 | `--prompt-json <JSON>` | Prompt as JSON content blocks. |
 | `-m, --model <MODEL>` | Model id, e.g. `grok-4.6`. |
-| `--sandbox <PROFILE>` | Seatbelt profile: builtin `strict` / `workspace`, or custom from `$GROK_HOME/sandbox.toml` (`[profiles.X]` with `extends` + `read_only` / `read_write` DIRECTORY lists). 1.0.x change: kernel-enforced — `strict` denies file reads outside cwd / `GROK_HOME` / `TMPDIR`, so subscription auth via an outside `GROK_AUTH_PATH` fails with "Not signed in"; the helpers ship `relayauth` (strict + read_write on only the auth dir). An unappliable CUSTOM profile makes grok refuse to start (fail closed, verified on 1.0.3); an unappliable BUILT-IN profile only warns and continues unenforced. The grant is bounded: never `/`, never `$HOME` or an ancestor, never a git repo root, resolved physically, TOML-safe. |
+| `--sandbox <PROFILE>` | Seatbelt profile: builtin `strict` / `workspace`, or custom from `$GROK_HOME/sandbox.toml` (`[profiles.X]` with `extends` + `read_only` / `read_write` DIRECTORY lists). 1.0.x change: kernel-enforced — `strict` denies file reads outside cwd / `GROK_HOME` / `TMPDIR`, so subscription auth via an outside `GROK_AUTH_PATH` fails with "Not signed in"; the helpers ship `relayauth` (strict + read_write on only the auth dir). An unappliable CUSTOM profile makes grok refuse to start (fail closed, verified on 1.0.3); an unappliable BUILT-IN profile only warns and continues unenforced. The grant is bounded: the resolved dir must actually hold the credential, and is never `/`, never `$HOME` or an ancestor, never a git repository (worktree or bare), never carries `*` `?` `[` or edge whitespace (grok reads a trailing `/*` as the PARENT dir and skips other globs), resolved physically, TOML-safe. |
 | `--output-format <FMT>` | `plain` (default), `json`, `streaming-json`. |
 | `--disable-web-search` | Disable web search + fetch. Mandatory for diff-deterministic review. |
 | `--effort <LEVEL>` | `low\|medium\|high\|xhigh\|max`. `--reasoning-effort` also exists. reasoning effort supported (model default `high`; `--effort high` live-verified on grok-4.5 at its launch). |
@@ -436,7 +445,7 @@ iso=$(mktemp -d "${TMPDIR:-/tmp}/grok-iso.XXXXXX")
 ap="${GROK_AUTH_PATH:-${GROK_HOME:-$HOME/.grok}/auth.json}"
 grokbin=$(command -v grok)
 # relayauth_profile is defined in the "Data egress" section above — it bounds the grant before writing
-relayauth_profile "$ap" "$gh" || { echo "unsafe auth dir — refusing to grant it" >&2; return 1 2>/dev/null || exit 1; }
+relayauth_profile "$ap" "$gh" || echo "unsafe auth dir — grok will fail to authenticate" >&2   # no `exit`: this block is pasted into a live shell
 ( cd "$iso" && env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin HOME="$gh" GROK_HOME="$gh" TMPDIR="$gh" TERM=dumb \
     GROK_TELEMETRY_ENABLED=false GROK_TELEMETRY_TRACE_UPLOAD=false GROK_EXTERNAL_OTEL=false GROK_AUTH_PATH="$ap" \
     RUST_LOG=debug "$grokbin" -p "test" -m grok-4.6 --disable-web-search --sandbox relayauth --deny '*' 2>/tmp/grok-debug.log ) &
@@ -518,7 +527,7 @@ Walk this ladder in order and stop at the first verdict:
    ap="${GROK_AUTH_PATH:-${GROK_HOME:-$HOME/.grok}/auth.json}"
    grokbin=$(command -v grok)
    # relayauth_profile is defined in the "Data egress" section above — it bounds the grant before writing
-   relayauth_profile "$ap" "$gh" || { echo "unsafe auth dir — refusing to grant it" >&2; return 1 2>/dev/null || exit 1; }
+   relayauth_profile "$ap" "$gh" || echo "unsafe auth dir — grok will fail to authenticate" >&2   # no `exit`: this block is pasted into a live shell
    ( cd "$iso" && env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin HOME="$gh" GROK_HOME="$gh" TMPDIR="$gh" TERM=dumb \
        GROK_TELEMETRY_ENABLED=false GROK_TELEMETRY_TRACE_UPLOAD=false GROK_EXTERNAL_OTEL=false GROK_AUTH_PATH="$ap" \
        perl -e 'alarm shift; exec @ARGV' 120 \

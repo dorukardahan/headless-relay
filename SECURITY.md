@@ -247,9 +247,21 @@ a key can't be traced onto stderr) and cleanup `trap`s on EXIT / INT / TERM / HU
   `write_auth_json` persists via **temp+rename** (the source notes it "allocates a new inode per
   rewrite"), which breaks the link, so refreshes would silently land on a detached copy (and the
   rename needs directory write anyway). What v3.1.1 does instead is **bound which directory** may be
-  granted: never `/`, never your `$HOME` or any ancestor of it, never a git repository root, resolved
-  to its physical path first (so a symlinked or `../`-laden path cannot widen it), and rejected
-  outright if the name contains a quote, backslash, or newline. Anything outside those bounds fails
+  granted: it must demonstrably hold the credential file itself, and it is never `/`, never your `$HOME`
+  or any ancestor of it, never a git repository (worktree **or** bare — a bare repo has no `.git`),
+  resolved to its physical path first (so a symlinked or `../`-laden path cannot widen it), and
+  rejected outright if the path carries a quote, backslash, or newline (checked *before* resolution,
+  because command substitution strips trailing newlines) — or a `*`, `?`, `[`, or edge whitespace,
+  because grok reads a **trailing `/*` or `/**` as the parent directory** (a dir literally named `*`
+  would otherwise widen the grant one level, straight past the `$HOME` bound) and silently skips any
+  other glob entry. Everything the bounds do NOT name is still grantable, so this is a floor, not a
+  policy: `GROK_AUTH_PATH=/tmp/auth.json` is accepted and would hand the shared temp dir to the
+  sandboxed process, and a subdirectory *inside* the granted dir gets the same read/write even if it
+  is itself a repository. Point the credential at a dedicated directory and the question disappears.
+  **Not** a concern (checked): the validated path is frozen into `sandbox.toml` and the kernel enforces
+  that string, so a same-UID process swapping the directory after the checks cannot widen what was
+  granted — and swapping the credential file makes grok's own open resolve outside the grant, which the
+  kernel then denies. Anything outside those bounds fails
   closed before grok starts. **Hardening tip:** run `grok login` with
   `GROK_AUTH_PATH="$HOME/.grok-auth/auth.json"` and keep that directory dedicated to the credential —
   then the grant covers a directory holding nothing but the token.
@@ -364,8 +376,8 @@ all three vendors, telemetry schema, and the lenient `toml::Value` config parse 
 tool call; `image_gen` runs under the media allow-list; the `disable_codebase_upload` string exists) —
 NOT proven to be the same commit as the source. (3) **Fake-runtime-tested**:
 `scripts/test-grok-runtime.sh` exercises the WRAPPER's isolation, lifecycle, and publish against a
-fake `grok` on sh/bash/zsh (no real grok, no network), 60 scenarios × 3 shells. The pass policy: **every
-non-skipped cell must PASS and all 26/26 mutations must be caught**; the only permitted skips are
+fake `grok` on sh/bash/zsh (no real grok, no network), 72 scenarios × 3 shells. The pass policy: **every
+non-skipped cell must PASS and every mutation must be caught (37/37 at the v3.1.1 tag)**; the only permitted skips are
 documented ones — (a) the two normal/nonzero descendant-reaping scenarios (that cleanup is intentionally
 NOT provided on any shell; only signal/timeout reaping, while grok is alive, is guaranteed), and (b) a
 publish-time signal scenario ONLY when it observes the local `.grokpub.*` temp window described below.
