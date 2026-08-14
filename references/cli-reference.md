@@ -341,6 +341,7 @@ printf '[features]\ntelemetry = false\n[telemetry]\ntrace_upload = false\n[folde
 relayauth_profile() (   # $1 = auth.json path, $2 = the temp GROK_HOME to write the profile into
   # subshell body: no `local` in POSIX sh, so this keeps _apd/_hp out of the caller's namespace
   [ -d "${2:-}" ] || exit 1
+  { [ -f "$1" ] && [ -r "$1" ]; } || exit 1   # a directory would satisfy both identity checks below and grant its PARENT
   [ "$(printf '%s' "$1" | wc -l | tr -d ' ')" = 0 ] || exit 1
   _apd=$(cd "$(dirname "$1")" 2>/dev/null && pwd -P) || exit 1
   [ "$_apd/${1##*/}" -ef "$1" ] || exit 1       # file identity (inode+device), not mere readability

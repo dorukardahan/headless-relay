@@ -382,8 +382,8 @@ all three vendors, telemetry schema, and the lenient `toml::Value` config parse 
 tool call; `image_gen` runs under the media allow-list; the `disable_codebase_upload` string exists) —
 NOT proven to be the same commit as the source. (3) **Fake-runtime-tested**:
 `scripts/test-grok-runtime.sh` exercises the WRAPPER's isolation, lifecycle, and publish against a
-fake `grok` on sh/bash/zsh (no real grok, no network), 76 scenarios × 3 shells. The pass policy: **every
-non-skipped cell must PASS and every mutation must be caught (41/41 at the v3.1.1 tag)**; the only permitted skips are
+fake `grok` on sh/bash/zsh (no real grok, no network), 77 scenarios × 3 shells. The pass policy: **every
+non-skipped cell must PASS and every mutation must be caught (42/42 at the v3.1.1 tag)**; the only permitted skips are
 documented ones — (a) the two normal/nonzero descendant-reaping scenarios (that cleanup is intentionally
 NOT provided on any shell; only signal/timeout reaping, while grok is alive, is guaranteed), and (b) a
 publish-time signal scenario ONLY when it observes the local `.grokpub.*` temp window described below.

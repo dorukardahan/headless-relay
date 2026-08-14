@@ -112,7 +112,7 @@ grok_relay() (
   if [ -z "$key" ]; then                                     # subscription: grok precedence GROK_AUTH_PATH > $GROK_HOME/auth.json > $HOME/.grok/auth.json
     ap="${GROK_AUTH_PATH:-${GROK_HOME:-$HOME/.grok}/auth.json}"
     case "$ap" in /*) ;; *) ap="$(pwd)/$ap" ;; esac          # absolutise before any cd
-    [ -r "$ap" ] || { echo "grok_relay: no readable auth at $ap — run 'grok login', or set XAI_API_KEY" >&2; exit 1; }
+    { [ -f "$ap" ] && [ -r "$ap" ]; } || { echo "grok_relay: no readable auth FILE at $ap — run 'grok login', or set XAI_API_KEY" >&2; exit 1; }   # -f, not just -r: a GROK_AUTH_PATH that names a directory (a typo dropping /auth.json) satisfies -r and both identity checks below, and would grant that directory's PARENT
   fi
   to=${GROK_RELAY_TIMEOUT:-300}; case "$to" in ''|*[!0-9]*) to=300 ;; esac; [ "$to" -gt 0 ] || to=300
   base=$(mktemp -d "${TMPDIR:-/tmp}/grok-ctl.XXXXXX") || { echo "grok_relay: mktemp failed" >&2; exit 1; }   # CONTROL (answer file); grok never told this path
@@ -277,7 +277,7 @@ grok_media() (
   if [ -z "$key" ]; then
     ap="${GROK_AUTH_PATH:-${GROK_HOME:-$HOME/.grok}/auth.json}"
     case "$ap" in /*) ;; *) ap="$(pwd)/$ap" ;; esac
-    [ -r "$ap" ] || { echo "grok_media: no readable auth at $ap — run 'grok login', or set XAI_API_KEY" >&2; exit 1; }
+    { [ -f "$ap" ] && [ -r "$ap" ]; } || { echo "grok_media: no readable auth FILE at $ap — run 'grok login', or set XAI_API_KEY" >&2; exit 1; }   # -f, not just -r: a GROK_AUTH_PATH that names a directory (a typo dropping /auth.json) satisfies -r and both identity checks below, and would grant that directory's PARENT
   fi
   to=${GROK_MEDIA_TIMEOUT:-600}; case "$to" in ''|*[!0-9]*) to=600 ;; esac; [ "$to" -gt 0 ] || to=600
   base=$(mktemp -d "${TMPDIR:-/tmp}/grok-ctl.XXXXXX") || { echo "grok_media: mktemp failed" >&2; exit 1; }    # CONTROL (manifest); grok never told this path

@@ -546,6 +546,18 @@ authdir_whitespace_refuse)
   fake_ran && fail "SECURITY: grok ran with a grant entry it would silently skip"
   ok ;;
 
+authdir_path_is_dir)
+  # GROK_AUTH_PATH naming a DIRECTORY (a typo dropping /auth.json) satisfies -r, and both identity
+  # checks pass trivially because the dir IS what dirname resolves against — the grant would become
+  # that directory's PARENT. Refuse anything that is not a regular file.
+  setup_home; mkdir -p "$run/parent/auth-dir"
+  export GROK_AUTH_PATH="$run/parent/auth-dir"
+  grok_relay "q" >/dev/null 2>"$run/err"; rc=$?
+  [ "$rc" = 1 ] || fail "expected fail-closed exit 1, got $rc"
+  grep -q 'no readable auth FILE' "$run/err" || fail "no regular-file message: [$(cat "$run/err")]"
+  fake_ran && fail "SECURITY: a directory auth path granted its parent"
+  ok ;;
+
 authdir_bare_repo_refuse)
   # a BARE repo has no .git entry — the repository bound must catch it anyway
   setup_home; mkdir -p "$run/bare"; ( cd "$run/bare" && git init --bare -q ) || fail "git init --bare"
@@ -1050,7 +1062,7 @@ descendant_normal_exit descendant_nonzero_exit publish_sig_int publish_sig_term 
 media_timeout newline_failclosed artifact_spacename concurrent_rollback_isolation nohl_failclosed rollback_preserves_preexisting concurrent_reverse_timing \
 newline_output_dir dash_pgid_safety \
 sandbox_profile_sub sandbox_profile_apikey authdir_home_refuse authdir_repo_refuse authdir_symlink_escape authdir_toml_unsafe \
-sandbox_profile_media authdir_home_media_refuse authdir_newline_path authdir_resolve_mismatch authdir_resolve_decoy authdir_dir_identity authdir_control_char authdir_whitespace_refuse authdir_bare_repo_refuse authdir_glob_refuse"
+sandbox_profile_media authdir_home_media_refuse authdir_newline_path authdir_resolve_mismatch authdir_resolve_decoy authdir_dir_identity authdir_control_char authdir_whitespace_refuse authdir_path_is_dir authdir_bare_repo_refuse authdir_glob_refuse"
 
 echo "=================================================================================="
 echo " grok_relay / grok_media — RUNTIME isolation proof (M6, fake grok, no network)"
@@ -1131,6 +1143,7 @@ if [ -n "$MUTSHELL" ]; then
   run_mut AO "directory-identity bound removed"            authdir_dir_identity   's#\[ "$apd" -ef "$(dirname "$ap")" \]#true#g'
   run_mut AP "control-character bound deleted"             authdir_control_char   '/\[\[:cntrl:\]\]/d'
   run_mut AQ "edge-whitespace bound deleted"               authdir_whitespace_refuse '/leading.trailing whitespace/d'
+  run_mut AR "regular-file requirement weakened to -r"      authdir_path_is_dir    's@{ \[ -f "$ap" \] && \[ -r "$ap" \]; }@[ -r "$ap" ]@g'
   run_mut AJ "bare-repository bound removed"               authdir_bare_repo_refuse 's#\[ -d "$apd/objects" \]#false#g'
   run_mut AK "newline pre-check line deleted"              authdir_newline_path   '/# BEFORE resolving:/d'
   run_mut AL "glob/metacharacter bound removed"            authdir_glob_refuse    's#skips any other glob entry; refusing" >&2; exit 1#skips any other glob entry; refusing" >\&2; true#g'
