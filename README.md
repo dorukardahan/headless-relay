@@ -33,7 +33,12 @@ is a single `git clone`; everything else on this page is detail for when you nee
 > secrets and grok's own endpoint / auth-provider-command / log / compat overrides) with an empty
 > synthetic `HOME` AND a clean temporary `GROK_HOME` (your real login reached out-of-band via
 > `GROK_AUTH_PATH`, or `XAI_API_KEY`), in an empty non-git directory (verified outside any git tree),
-> with its tool use locked down and a real watchdog timeout. Scope is personal / consumer auth —
+> with its tool use locked down and a real watchdog timeout. One thing to know if you use a
+> subscription login: grok 1.0.x's sandbox is kernel-enforced and would block grok from reading your
+> `auth.json`, so the helper ships a seatbelt profile granting read/write on **the directory holding that
+> credential, and nothing else** — bounded so it can never be `/`, your home directory, a git repository,
+> or anything that is not the credential's own directory. Point `GROK_AUTH_PATH` at a dedicated directory
+> and that grant covers nothing but the token. Scope is personal / consumer auth —
 > team/enterprise managed-policy parity is unverified. None of this makes Grok local
 > — it is still a cloud model; the prompt and Grok's reasoning go to xAI. For the full history, the
 > audit, and what to do if you already used Grok Build in a real repo, read **[SECURITY.md](SECURITY.md)**.
@@ -138,5 +143,7 @@ helper flags were confirmed present and one live subscription `grok_relay` call 
 the CLI default 2026-08-12 and the helpers now pin `-m grok-4.6`; the GLM lane re-verified on
 GLM-5.3 (`zai-coding-plan/glm-5.3`, launched that day, smoke-verified via opencode; the ZCode app
 still pins glm-5.2 in its own config); and the Claude lane verified headless with Opus 5
-(`claude -p --model claude-opus-5`). CLIs drift fast, so re-verify
+(`claude -p --model claude-opus-5`). v3.1.1 then bounded the seatbelt grant to the credential's own
+directory, after seven review rounds (Codex, GPT 5.6 Sol, GLM 5.3) whose findings were each reproduced
+locally before being fixed. CLIs drift fast, so re-verify
 flags when something errors.
