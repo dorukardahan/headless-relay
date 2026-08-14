@@ -2,7 +2,7 @@
 name: headless-relay
 description: Headless handoff guide for running other AI models from inside an agent session (any Agent Skills runtime - Claude Code, Codex, Grok Build, Cursor, OpenClaw, Hermes). Covers GPT (codex exec), GLM (opencode run or zcode --prompt), Grok (grok -p), Gemini (Antigravity agy -p), and Claude (claude -p or a subagent) - inline vs file prompts, parallel multi-model consensus, JSON output, session resume, image/video generation, provider-terms compliance. Use for "ask codex", "ask GLM", "ask grok", "ask gemini", "second opinion", "cross-model review", "generate an image", "run headless", "ask another model".
 license: MIT. Complete terms in LICENSE.txt
-metadata: {"version": "3.1.0"}
+metadata: {"version": "3.1.1"}
 ---
 
 # headless-relay
@@ -157,10 +157,14 @@ hooks = false
 sessions = false
 ' > "$gkh/config.toml" || { echo "grok_relay: could not write config" >&2; exit 1; }
   [ -s "$gkh/config.toml" ] || { echo "grok_relay: config incomplete" >&2; exit 1; }
-  if [ -z "$key" ]; then                                     # subscription on grok 1.0.x: the strict seatbelt denies reading $ap outside the sandbox — grant ONLY the real auth dir via a custom profile (an unappliable profile makes grok refuse to start: fail closed)
-    [ "$(printf '%s' "$ap" | wc -l | tr -d ' ')" = 0 ] || { echo "grok_relay: newline in auth path" >&2; exit 1; }
-    case "$ap" in *'"'*|*'\'*) echo "grok_relay: TOML-unsafe character in auth path" >&2; exit 1 ;; esac
-    apd=$(dirname "$ap")
+  if [ -z "$key" ]; then                                     # subscription on grok 1.0.x: the seatbelt is KERNEL-enforced, so plain `strict` denies reading $ap outside the sandbox. Grant ONLY the auth DIRECTORY: grok persists a refreshed token with temp+rename (needs directory write), and a rotating refresh token that cannot be persisted silently kills the login — read_only is NOT a safe substitute (see SECURITY.md). An unappliable profile makes grok refuse to start: fail closed.
+    apd=$(cd "$(dirname "$ap")" 2>/dev/null && pwd -P) || { echo "grok_relay: auth directory not readable: $(dirname "$ap")" >&2; exit 1; }   # PHYSICAL path: a symlinked or ../-laden auth dir cannot smuggle a broader grant past the bounds below
+    __hp=$(cd "$HOME" 2>/dev/null && pwd -P) || __hp="$HOME"
+    [ "$apd" = "/" ] && { echo "grok_relay: refusing to grant / as the auth dir" >&2; exit 1; }
+    case "$__hp/" in "$apd"/*) echo "grok_relay: auth dir '$apd' contains your home directory — too broad to grant; point GROK_AUTH_PATH at a dedicated dir (see SECURITY.md)" >&2; exit 1 ;; esac   # rejects $HOME itself and every ancestor (/Users, /home, ...)
+    [ -e "$apd/.git" ] && { echo "grok_relay: auth dir '$apd' is a git repository root — refusing to grant it" >&2; exit 1; }
+    [ "$(printf '%s' "$apd" | wc -l | tr -d ' ')" = 0 ] || { echo "grok_relay: newline in auth dir" >&2; exit 1; }
+    case "$apd" in *'"'*|*'\'*) echo "grok_relay: TOML-unsafe character in auth dir" >&2; exit 1 ;; esac
     printf '[profiles.relayauth]\nextends = "strict"\nread_write = ["%s"]\n' "$apd" > "$gkh/sandbox.toml" || { echo "grok_relay: could not write sandbox profile" >&2; exit 1; }
     [ -s "$gkh/sandbox.toml" ] || { echo "grok_relay: sandbox profile incomplete" >&2; exit 1; }
   fi
@@ -313,10 +317,14 @@ hooks = false
 sessions = false
 ' > "$gkh/config.toml" || { echo "grok_media: could not write config" >&2; exit 1; }
   [ -s "$gkh/config.toml" ] || { echo "grok_media: config incomplete" >&2; exit 1; }
-  if [ -z "$key" ]; then                                     # subscription on grok 1.0.x: the strict seatbelt denies reading $ap outside the sandbox — grant ONLY the real auth dir via a custom profile (an unappliable profile makes grok refuse to start: fail closed)
-    [ "$(printf '%s' "$ap" | wc -l | tr -d ' ')" = 0 ] || { echo "grok_media: newline in auth path" >&2; exit 1; }
-    case "$ap" in *'"'*|*'\'*) echo "grok_media: TOML-unsafe character in auth path" >&2; exit 1 ;; esac
-    apd=$(dirname "$ap")
+  if [ -z "$key" ]; then                                     # subscription on grok 1.0.x: the seatbelt is KERNEL-enforced, so plain `strict` denies reading $ap outside the sandbox. Grant ONLY the auth DIRECTORY: grok persists a refreshed token with temp+rename (needs directory write), and a rotating refresh token that cannot be persisted silently kills the login — read_only is NOT a safe substitute (see SECURITY.md). An unappliable profile makes grok refuse to start: fail closed.
+    apd=$(cd "$(dirname "$ap")" 2>/dev/null && pwd -P) || { echo "grok_media: auth directory not readable: $(dirname "$ap")" >&2; exit 1; }   # PHYSICAL path: a symlinked or ../-laden auth dir cannot smuggle a broader grant past the bounds below
+    __hp=$(cd "$HOME" 2>/dev/null && pwd -P) || __hp="$HOME"
+    [ "$apd" = "/" ] && { echo "grok_media: refusing to grant / as the auth dir" >&2; exit 1; }
+    case "$__hp/" in "$apd"/*) echo "grok_media: auth dir '$apd' contains your home directory — too broad to grant; point GROK_AUTH_PATH at a dedicated dir (see SECURITY.md)" >&2; exit 1 ;; esac   # rejects $HOME itself and every ancestor (/Users, /home, ...)
+    [ -e "$apd/.git" ] && { echo "grok_media: auth dir '$apd' is a git repository root — refusing to grant it" >&2; exit 1; }
+    [ "$(printf '%s' "$apd" | wc -l | tr -d ' ')" = 0 ] || { echo "grok_media: newline in auth dir" >&2; exit 1; }
+    case "$apd" in *'"'*|*'\'*) echo "grok_media: TOML-unsafe character in auth dir" >&2; exit 1 ;; esac
     printf '[profiles.relayauth]\nextends = "strict"\nread_write = ["%s"]\n' "$apd" > "$gkh/sandbox.toml" || { echo "grok_media: could not write sandbox profile" >&2; exit 1; }
     [ -s "$gkh/sandbox.toml" ] || { echo "grok_media: sandbox profile incomplete" >&2; exit 1; }
   fi

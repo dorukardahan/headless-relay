@@ -229,7 +229,30 @@ a key can't be traced onto stderr) and cleanup `trap`s on EXIT / INT / TERM / HU
   v3.1.0 the subscription branch ships a `relayauth` profile into the temp `GROK_HOME`
   (`extends = "strict"` plus `read_write` on ONLY the real auth directory), because the grok 1.0.x
   seatbelt is kernel-enforced and plain `strict` denies reading `GROK_AUTH_PATH` outside the sandbox;
-  the API-key branch stays on plain `strict`. An unappliable profile makes grok refuse to start.
+  the API-key branch stays on plain `strict`. An unappliable **custom** profile makes grok refuse to
+  start (fail closed, verified on 1.0.3); an unappliable **built-in** profile only warns and runs
+  unenforced, so `strict` on the API-key branch is best-effort. Neither is load-bearing — the isolation
+  rests on `env -i`, the empty `HOME` / temp `GROK_HOME`, the non-git CWD, and the tool restriction.
+
+  **Read this before pointing `GROK_AUTH_PATH` somewhere unusual.** `read_write` entries must be
+  directories (grok rejects a file: *"Expected a directory but got a file"*), so the grant is the auth
+  file's whole parent directory — for the default path that is `~/.grok`, which also holds
+  `config.toml`, `logs/`, `sessions/`, and any `skills/` you keep there. The grant is **read and
+  write**, so a binary that diverged from the audited source could read those logs or poison that
+  `config.toml` / a skill for a **future raw** `grok` run. Two tighter designs were tested and
+  rejected on evidence: (1) `read_only` — grok's OIDC refresh tokens **rotate** and are
+  double-spend-protected, and a failed persist is only logged (`auth: failed to persist refreshed
+  token to disk`), so the new token would be lost while the spent one stayed on disk and the login
+  would die silently a call later; (2) hard-linking `auth.json` into a narrower granted directory —
+  `write_auth_json` persists via **temp+rename** (the source notes it "allocates a new inode per
+  rewrite"), which breaks the link, so refreshes would silently land on a detached copy (and the
+  rename needs directory write anyway). What v3.1.1 does instead is **bound which directory** may be
+  granted: never `/`, never your `$HOME` or any ancestor of it, never a git repository root, resolved
+  to its physical path first (so a symlinked or `../`-laden path cannot widen it), and rejected
+  outright if the name contains a quote, backslash, or newline. Anything outside those bounds fails
+  closed before grok starts. **Hardening tip:** run `grok login` with
+  `GROK_AUTH_PATH="$HOME/.grok-auth/auth.json"` and keep that directory dedicated to the credential —
+  then the grant covers a directory holding nothing but the token.
 - **Media published atomically, never written in place.** `grok_media` never runs grok in your output
   dir. grok writes media under the temp `GROK_HOME` session dir (`paths.rs` `sessions_cwd_dir` =
   `grok_home()/sessions/…`); the helper then publishes only THIS call's artifacts by copying each into

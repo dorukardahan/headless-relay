@@ -53,7 +53,7 @@ if [ "$_hr" != 1 ] || [ "$_hm" != 1 ]; then
   echo "FATAL: could not extract exactly one grok_relay and one grok_media (relay=$_hr media=$_hm)" >&2; exit 2
 fi
 sh -n "$PRISTINE" 2>"$WORK/synerr" || { echo "FATAL: extracted helpers do not parse: $(cat "$WORK/synerr")" >&2; exit 2; }
-for anchor in 'env -i' '\-\-deny' 'image_gen' 'GROK_AUTH_PATH' 'mktemp -d' 'trap ' 'set +eux' 'ln "$curtmp"' 'NO-HARDLINK-FAILCLOSED' 'manifest0' 'pending=' 'sbxreal' '_reappg' 'pgok' 'ps -o pgid=' 'case "$brief$out"' 'pwd -P' '_rollback' 'could not write config' '_ingit'; do
+for anchor in 'env -i' '\-\-deny' 'image_gen' 'GROK_AUTH_PATH' 'mktemp -d' 'trap ' 'set +eux' 'ln "$curtmp"' 'NO-HARDLINK-FAILCLOSED' 'manifest0' 'pending=' 'sbxreal' '_reappg' 'pgok' 'ps -o pgid=' 'case "$brief$out"' 'pwd -P' '_rollback' 'could not write config' '_ingit' 'profiles.relayauth' 'contains your home directory' 'is a git repository root'; do
   grep -q "$anchor" "$PRISTINE" || { echo "FATAL: extracted helpers missing anchor: $anchor" >&2; exit 2; }
 done
 
@@ -119,6 +119,14 @@ val()   { eval "_v=\${$1:-<UNSET>}"; printf '%s=%s\n' "$1" "$_v"; }
     printf 'CFG_SKILLS_FALSE_N=%s\n' "$(grep -c 'skills = false' "$cfg")"
     printf 'CFG_COMPAT_FALSE_N=%s\n' "$(grep -cE '^(skills|rules|agents|mcps|hooks|sessions) = false' "$cfg")"
   else echo "CFG_MISSING=yes"; fi
+  # the relayauth seatbelt profile (subscription branch only): presence, base, EXACT grant, entry count
+  sbxf="${GROK_HOME:-/nope}/sandbox.toml"
+  if [ -f "$sbxf" ]; then
+    echo "SBX_PRESENT=yes"
+    grep -q '^extends = "strict"' "$sbxf" && echo "SBX_EXTENDS=yes" || echo "SBX_EXTENDS=no"
+    printf 'SBX_GRANT=%s\n' "$(sed -n 's/^read_write = \["\(.*\)"\]$/\1/p' "$sbxf")"
+    printf 'SBX_ENTRIES=%s\n' "$(sed -n 's/^read_write = \[\(.*\)\]$/\1/p' "$sbxf" | tr ',' '\n' | grep -c '"')"
+  else echo "SBX_PRESENT=no"; fi
   echo "ARGV_BEGIN"; for _a in "$@"; do printf '%s\n' "$_a"; done; echo "ARGV_END"
 } >> "$F"
 # per-call overrides embedded in the prompt/brief argv (so concurrent calls can differ with one fake)
@@ -338,6 +346,70 @@ sub_failclosed)
   [ "$rc" = 1 ] || fail "expected fail-closed exit 1, got $rc"
   grep -q 'no readable auth' "$run/err" || fail "no fail-closed message: [$(cat "$run/err")]"
   fake_ran && fail "SECURITY: grok ran despite missing auth"
+  ok ;;
+
+sandbox_profile_sub)
+  # subscription: --sandbox relayauth + a profile granting EXACTLY the auth dir (one entry, extends strict)
+  setup_home; mkdir -p "$run/adir"; cp "$realhome/.grok/auth.json" "$run/adir/auth.json"; export GROK_AUTH_PATH="$run/adir/auth.json"
+  want=$(cd "$run/adir" && pwd -P)
+  grok_relay "q" >/dev/null 2>"$run/err"; rc=$?
+  [ "$rc" = 0 ] || fail "rc=$rc err=[$(cat "$run/err")]"
+  awk '/^ARGV_BEGIN$/{f=1;next} /^ARGV_END$/{f=0} f' "$(E)" > "$run/argv"
+  grep -qx -- 'relayauth' "$run/argv" || fail "subscription: --sandbox relayauth absent"
+  [ "$(lg SBX_PRESENT)" = yes ] || fail "sandbox.toml not written into the temp GROK_HOME"
+  [ "$(lg SBX_EXTENDS)" = yes ] || fail "profile does not extend the builtin strict"
+  [ "$(lg SBX_GRANT)" = "$want" ] || fail "GRANT WIDENED: got [$(lg SBX_GRANT)] want [$want]"
+  [ "$(lg SBX_ENTRIES)" = 1 ] || fail "GRANT WIDENED: expected exactly 1 read_write entry, got $(lg SBX_ENTRIES)"
+  ok ;;
+
+sandbox_profile_apikey)
+  # API-key branch reads no auth file -> must stay on builtin strict with NO custom profile
+  setup_home; export XAI_API_KEY=SYNTHETIC-KEY-NOT-REAL
+  grok_relay "q" >/dev/null 2>"$run/err"; rc=$?
+  [ "$rc" = 0 ] || fail "rc=$rc err=[$(cat "$run/err")]"
+  awk '/^ARGV_BEGIN$/{f=1;next} /^ARGV_END$/{f=0} f' "$(E)" > "$run/argv"
+  grep -qx -- 'strict' "$run/argv" || fail "api-key: builtin --sandbox strict absent"
+  grep -qx -- 'relayauth' "$run/argv" && fail "api-key: must NOT use the auth-granting profile"
+  [ "$(lg SBX_PRESENT)" = no ] || fail "api-key branch wrote a sandbox profile it does not need"
+  ok ;;
+
+authdir_home_refuse)
+  # auth dir == $HOME would grant the whole home directory -> refuse before grok runs
+  setup_home; cp "$realhome/.grok/auth.json" "$realhome/auth.json"; export GROK_AUTH_PATH="$realhome/auth.json"
+  grok_relay "q" >/dev/null 2>"$run/err"; rc=$?
+  [ "$rc" = 1 ] || fail "expected fail-closed exit 1, got $rc"
+  grep -q 'contains your home directory' "$run/err" || fail "no bounds message: [$(cat "$run/err")]"
+  fake_ran && fail "SECURITY: grok ran with a home-wide grant"
+  ok ;;
+
+authdir_repo_refuse)
+  # auth dir that is a git repo root -> refuse (never grant a repository)
+  setup_home; mkdir -p "$run/authrepo"; ( cd "$run/authrepo" && git init -q ) || fail "git init"
+  cp "$realhome/.grok/auth.json" "$run/authrepo/auth.json"; export GROK_AUTH_PATH="$run/authrepo/auth.json"
+  grok_relay "q" >/dev/null 2>"$run/err"; rc=$?
+  [ "$rc" = 1 ] || fail "expected fail-closed exit 1, got $rc"
+  grep -q 'git repository root' "$run/err" || fail "no repo-root message: [$(cat "$run/err")]"
+  fake_ran && fail "SECURITY: grok ran with a repository granted"
+  ok ;;
+
+authdir_symlink_escape)
+  # a symlinked auth dir must be resolved PHYSICALLY before the bounds are applied
+  setup_home; cp "$realhome/.grok/auth.json" "$realhome/auth.json"
+  ln -s "$realhome" "$run/homelink" || fail "symlink"
+  export GROK_AUTH_PATH="$run/homelink/auth.json"
+  grok_relay "q" >/dev/null 2>"$run/err"; rc=$?
+  [ "$rc" = 1 ] || fail "expected fail-closed exit 1 (symlink resolves to \$HOME), got $rc"
+  fake_ran && fail "SECURITY: a symlinked auth dir smuggled a home-wide grant past the bounds"
+  ok ;;
+
+authdir_toml_unsafe)
+  # a double quote in the auth dir would break out of the TOML basic string -> refuse
+  setup_home; mkdir -p "$run/au\"th"; cp "$realhome/.grok/auth.json" "$run/au\"th/auth.json"
+  export GROK_AUTH_PATH="$run/au\"th/auth.json"
+  grok_relay "q" >/dev/null 2>"$run/err"; rc=$?
+  [ "$rc" = 1 ] || fail "expected fail-closed exit 1, got $rc"
+  grep -q 'TOML-unsafe' "$run/err" || fail "no TOML-safety message: [$(cat "$run/err")]"
+  fake_ran && fail "SECURITY: grok ran with an injectable auth dir"
   ok ;;
 
 apikey_branch)
@@ -821,7 +893,8 @@ publish_dest_symlink rollback_creates_out timeout watchdog_spoof sig_int sig_ter
 set_eu_success set_eu_usage sentinel_untouched spaces_metachars \
 descendant_normal_exit descendant_nonzero_exit publish_sig_int publish_sig_term publish_sig_hup \
 media_timeout newline_failclosed artifact_spacename concurrent_rollback_isolation nohl_failclosed rollback_preserves_preexisting concurrent_reverse_timing \
-newline_output_dir dash_pgid_safety"
+newline_output_dir dash_pgid_safety \
+sandbox_profile_sub sandbox_profile_apikey authdir_home_refuse authdir_repo_refuse authdir_symlink_escape authdir_toml_unsafe"
 
 echo "=================================================================================="
 echo " grok_relay / grok_media — RUNTIME isolation proof (M6, fake grok, no network)"
@@ -885,6 +958,12 @@ if [ -n "$MUTSHELL" ]; then
   run_mut Z "media timeout collapses to generic exit 3 (not 124)" media_timeout 's#if \[ "$rc" = 124 \]; then exit 124; fi#:#'
   run_mut AA "newline-in-OUTPUT-DIR guard disabled" newline_output_dir 's@\*"$__nl"\*)@*"ZZNOMATCHZZ"*)@'
   run_mut AB "pgid==child verification dropped (unverified negative kill)" dash_pgid_safety 's#\[ "$__pg" = "$child" \] && pgok=1#pgok=1#g'
+  run_mut AC "auth-dir home-ancestor bound removed"        authdir_home_refuse    's#case "$__hp/" in#case "ZZNOMATCHZZ" in#g'
+  run_mut AD "auth-dir repo-root bound removed"            authdir_repo_refuse    's#\[ -e "$apd/.git" \]#false#g'
+  run_mut AE "auth-dir physical-path resolution dropped"   authdir_symlink_escape 's#apd=$(cd "$(dirname "$ap")" 2>/dev/null && pwd -P)#apd=$(dirname "$ap")#g'
+  run_mut AF "subscription falls back to builtin strict"   sandbox_profile_sub    's/--sandbox relayauth/--sandbox strict/g'
+  run_mut AG "grant widened from the auth dir to \$HOME"   sandbox_profile_sub    's#"$apd" > "$gkh/sandbox.toml"#"$HOME" > "$gkh/sandbox.toml"#g'
+  run_mut AH "TOML-safety bound on the auth dir removed"   authdir_toml_unsafe    's#TOML-unsafe character in auth dir" >&2; exit 1#TOML-unsafe character in auth dir" >\&2; true#g'
 fi
 
 # --------------------------------------------------------------------------------- reporting
