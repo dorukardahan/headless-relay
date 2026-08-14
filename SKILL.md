@@ -2,7 +2,7 @@
 name: headless-relay
 description: Headless handoff guide for running other AI models from inside an agent session (any Agent Skills runtime - Claude Code, Codex, Grok Build, Cursor, OpenClaw, Hermes). Covers GPT (codex exec), GLM (opencode run or zcode --prompt), Grok (grok -p), Gemini (Antigravity agy -p), and Claude (claude -p or a subagent) - inline vs file prompts, parallel multi-model consensus, JSON output, session resume, image/video generation, provider-terms compliance. Use for "ask codex", "ask GLM", "ask grok", "ask gemini", "second opinion", "cross-model review", "generate an image", "run headless", "ask another model".
 license: MIT. Complete terms in LICENSE.txt
-metadata: {"version": "3.1.0"}
+metadata: {"version": "3.1.1"}
 ---
 
 # headless-relay
@@ -111,8 +111,8 @@ grok_relay() (
   key="${XAI_API_KEY:-${GROK_CODE_XAI_API_KEY:-}}"           # non-empty => API-key branch
   if [ -z "$key" ]; then                                     # subscription: grok precedence GROK_AUTH_PATH > $GROK_HOME/auth.json > $HOME/.grok/auth.json
     ap="${GROK_AUTH_PATH:-${GROK_HOME:-$HOME/.grok}/auth.json}"
-    case "$ap" in /*) ;; *) ap="$(pwd)/$ap" ;; esac          # absolutise before any cd
-    [ -r "$ap" ] || { echo "grok_relay: no readable auth at $ap — run 'grok login', or set XAI_API_KEY" >&2; exit 1; }
+    case "$ap" in /*) ;; *) [ "$(pwd)" -ef . ] || { echo "grok_relay: the working directory's name contains a newline — refusing to absolutise a relative auth path against it (command substitution would strip that newline and silently name a SIBLING directory's credential)" >&2; exit 1; }; ap="$(pwd)/$ap" ;; esac          # absolutise before any cd
+    { [ -f "$ap" ] && [ -r "$ap" ]; } || { echo "grok_relay: no readable auth FILE at $ap — run 'grok login', or set XAI_API_KEY" >&2; exit 1; }   # -f, not just -r: a GROK_AUTH_PATH that names a directory (a typo dropping /auth.json) satisfies -r and both identity checks below, and would grant that directory's PARENT
   fi
   to=${GROK_RELAY_TIMEOUT:-300}; case "$to" in ''|*[!0-9]*) to=300 ;; esac; [ "$to" -gt 0 ] || to=300
   base=$(mktemp -d "${TMPDIR:-/tmp}/grok-ctl.XXXXXX") || { echo "grok_relay: mktemp failed" >&2; exit 1; }   # CONTROL (answer file); grok never told this path
@@ -157,10 +157,19 @@ hooks = false
 sessions = false
 ' > "$gkh/config.toml" || { echo "grok_relay: could not write config" >&2; exit 1; }
   [ -s "$gkh/config.toml" ] || { echo "grok_relay: config incomplete" >&2; exit 1; }
-  if [ -z "$key" ]; then                                     # subscription on grok 1.0.x: the strict seatbelt denies reading $ap outside the sandbox — grant ONLY the real auth dir via a custom profile (an unappliable profile makes grok refuse to start: fail closed)
-    [ "$(printf '%s' "$ap" | wc -l | tr -d ' ')" = 0 ] || { echo "grok_relay: newline in auth path" >&2; exit 1; }
-    case "$ap" in *'"'*|*'\'*) echo "grok_relay: TOML-unsafe character in auth path" >&2; exit 1 ;; esac
-    apd=$(dirname "$ap")
+  if [ -z "$key" ]; then                                     # subscription on grok 1.0.x: the seatbelt is KERNEL-enforced, so plain `strict` denies reading $ap outside the sandbox. Grant ONLY the auth DIRECTORY: grok persists a refreshed token with temp+rename (needs directory write), and a rotating refresh token that cannot be persisted silently kills the login — read_only is NOT a safe substitute (see SECURITY.md). An unappliable CUSTOM profile makes grok refuse to start (fail closed, verified on 1.0.3); a built-in profile only warns and runs unenforced, so the API-key branch's plain strict is best-effort.
+    [ "$(printf '%s' "$ap" | wc -l | tr -d ' ')" = 0 ] || { echo "grok_relay: newline in auth path" >&2; exit 1; }   # BEFORE resolving: command substitution strips trailing newlines, so a newline-named dir would otherwise silently resolve to its newline-free sibling
+    apd=$(cd "$(dirname "$ap")" 2>/dev/null && pwd -P) || { echo "grok_relay: auth directory not readable: $(dirname "$ap")" >&2; exit 1; }   # PHYSICAL path: a symlinked or ../-laden auth dir cannot smuggle a broader grant past the bounds below
+    [ "$apd/${ap##*/}" -ef "$ap" ] || { echo "grok_relay: auth dir '$apd' does not hold $ap — refusing to grant a directory that is not the credential's own" >&2; exit 1; }   # IDENTITY, not mere readability: -ef compares inode+device, so a decoy of the same name in a newline-free sibling (reached when the RESOLVED path loses a trailing newline) cannot satisfy it
+    [ "$apd" -ef "$(dirname "$ap")" ] || { echo "grok_relay: resolved auth dir '$apd' is not the directory $ap lives in — refusing (a trailing newline was stripped from the resolved path, so this names a sibling)" >&2; exit 1; }   # DIRECTORY identity: the strongest form of the invariant. -ef accepts hard links and follows symlinks, so a same-inode alias of the credential planted in the newline-free sibling can satisfy the FILE check below — comparing the directories themselves cannot be spoofed that way.
+    __hp=$(cd "$HOME" 2>/dev/null && pwd -P) || __hp="$HOME"
+    [ "$apd" = "/" ] && { echo "grok_relay: refusing to grant / as the auth dir" >&2; exit 1; }   # belt-and-suspenders: the home bound below already rejects / (its %/ pattern becomes /*), and THAT bound is mutation-pinned
+    case "$__hp/" in "${apd%/}"/*) echo "grok_relay: auth dir '$apd' contains your home directory — too broad to grant; point GROK_AUTH_PATH at a dedicated dir (see SECURITY.md)" >&2; exit 1 ;; esac   # rejects $HOME, EVERY ancestor of it (/Users, /home, ...), and / itself (%/ makes the pattern /*)
+    { [ -e "$apd/.git" ] || { [ -d "$apd/objects" ] && [ -d "$apd/refs" ] && [ -e "$apd/HEAD" ]; }; } && { echo "grok_relay: auth dir '$apd' is a git repository (worktree or bare) — refusing to grant it" >&2; exit 1; }
+    case "$apd" in *[[:cntrl:]]*) echo "grok_relay: resolved auth dir holds a control character — refusing (it would land in the TOML unescaped; the newline pre-check above only sees the RAW path, so a symlink into a directory whose NAME contains an LF resolves with that LF mid-string)" >&2; exit 1 ;; esac
+    case "$apd" in *'"'*|*'\'*) echo "grok_relay: TOML-unsafe character in auth dir" >&2; exit 1 ;; esac
+    case "$apd" in *'*'*|*'?'*|*'['*) echo "grok_relay: auth dir '$apd' holds a sandbox metacharacter (* ? [) — grok reads a TRAILING /* or /** as the PARENT directory (so a dir named * would silently widen the grant one level, past the bounds above) and skips any other glob entry; refusing" >&2; exit 1 ;; esac
+    __tb=$(printf '\t'); case "$apd" in ' '*|*' '|"$__tb"*|*"$__tb") echo "grok_relay: auth dir has leading/trailing whitespace — grok skips such an entry, leaving the credential ungranted; refusing" >&2; exit 1 ;; esac
     printf '[profiles.relayauth]\nextends = "strict"\nread_write = ["%s"]\n' "$apd" > "$gkh/sandbox.toml" || { echo "grok_relay: could not write sandbox profile" >&2; exit 1; }
     [ -s "$gkh/sandbox.toml" ] || { echo "grok_relay: sandbox profile incomplete" >&2; exit 1; }
   fi
@@ -267,8 +276,8 @@ grok_media() (
   key="${XAI_API_KEY:-${GROK_CODE_XAI_API_KEY:-}}"
   if [ -z "$key" ]; then
     ap="${GROK_AUTH_PATH:-${GROK_HOME:-$HOME/.grok}/auth.json}"
-    case "$ap" in /*) ;; *) ap="$(pwd)/$ap" ;; esac
-    [ -r "$ap" ] || { echo "grok_media: no readable auth at $ap — run 'grok login', or set XAI_API_KEY" >&2; exit 1; }
+    case "$ap" in /*) ;; *) [ "$(pwd)" -ef . ] || { echo "grok_media: the working directory's name contains a newline — refusing to absolutise a relative auth path against it (command substitution would strip that newline and silently name a SIBLING directory's credential)" >&2; exit 1; }; ap="$(pwd)/$ap" ;; esac          # absolutise before any cd
+    { [ -f "$ap" ] && [ -r "$ap" ]; } || { echo "grok_media: no readable auth FILE at $ap — run 'grok login', or set XAI_API_KEY" >&2; exit 1; }   # -f, not just -r: a GROK_AUTH_PATH that names a directory (a typo dropping /auth.json) satisfies -r and both identity checks below, and would grant that directory's PARENT
   fi
   to=${GROK_MEDIA_TIMEOUT:-600}; case "$to" in ''|*[!0-9]*) to=600 ;; esac; [ "$to" -gt 0 ] || to=600
   base=$(mktemp -d "${TMPDIR:-/tmp}/grok-ctl.XXXXXX") || { echo "grok_media: mktemp failed" >&2; exit 1; }    # CONTROL (manifest); grok never told this path
@@ -313,10 +322,19 @@ hooks = false
 sessions = false
 ' > "$gkh/config.toml" || { echo "grok_media: could not write config" >&2; exit 1; }
   [ -s "$gkh/config.toml" ] || { echo "grok_media: config incomplete" >&2; exit 1; }
-  if [ -z "$key" ]; then                                     # subscription on grok 1.0.x: the strict seatbelt denies reading $ap outside the sandbox — grant ONLY the real auth dir via a custom profile (an unappliable profile makes grok refuse to start: fail closed)
-    [ "$(printf '%s' "$ap" | wc -l | tr -d ' ')" = 0 ] || { echo "grok_media: newline in auth path" >&2; exit 1; }
-    case "$ap" in *'"'*|*'\'*) echo "grok_media: TOML-unsafe character in auth path" >&2; exit 1 ;; esac
-    apd=$(dirname "$ap")
+  if [ -z "$key" ]; then                                     # subscription on grok 1.0.x: the seatbelt is KERNEL-enforced, so plain `strict` denies reading $ap outside the sandbox. Grant ONLY the auth DIRECTORY: grok persists a refreshed token with temp+rename (needs directory write), and a rotating refresh token that cannot be persisted silently kills the login — read_only is NOT a safe substitute (see SECURITY.md). An unappliable CUSTOM profile makes grok refuse to start (fail closed, verified on 1.0.3); a built-in profile only warns and runs unenforced, so the API-key branch's plain strict is best-effort.
+    [ "$(printf '%s' "$ap" | wc -l | tr -d ' ')" = 0 ] || { echo "grok_media: newline in auth path" >&2; exit 1; }   # BEFORE resolving: command substitution strips trailing newlines, so a newline-named dir would otherwise silently resolve to its newline-free sibling
+    apd=$(cd "$(dirname "$ap")" 2>/dev/null && pwd -P) || { echo "grok_media: auth directory not readable: $(dirname "$ap")" >&2; exit 1; }   # PHYSICAL path: a symlinked or ../-laden auth dir cannot smuggle a broader grant past the bounds below
+    [ "$apd/${ap##*/}" -ef "$ap" ] || { echo "grok_media: auth dir '$apd' does not hold $ap — refusing to grant a directory that is not the credential's own" >&2; exit 1; }   # IDENTITY, not mere readability: -ef compares inode+device, so a decoy of the same name in a newline-free sibling (reached when the RESOLVED path loses a trailing newline) cannot satisfy it
+    [ "$apd" -ef "$(dirname "$ap")" ] || { echo "grok_media: resolved auth dir '$apd' is not the directory $ap lives in — refusing (a trailing newline was stripped from the resolved path, so this names a sibling)" >&2; exit 1; }   # DIRECTORY identity: the strongest form of the invariant. -ef accepts hard links and follows symlinks, so a same-inode alias of the credential planted in the newline-free sibling can satisfy the FILE check below — comparing the directories themselves cannot be spoofed that way.
+    __hp=$(cd "$HOME" 2>/dev/null && pwd -P) || __hp="$HOME"
+    [ "$apd" = "/" ] && { echo "grok_media: refusing to grant / as the auth dir" >&2; exit 1; }   # belt-and-suspenders: the home bound below already rejects / (its %/ pattern becomes /*), and THAT bound is mutation-pinned
+    case "$__hp/" in "${apd%/}"/*) echo "grok_media: auth dir '$apd' contains your home directory — too broad to grant; point GROK_AUTH_PATH at a dedicated dir (see SECURITY.md)" >&2; exit 1 ;; esac   # rejects $HOME, EVERY ancestor of it (/Users, /home, ...), and / itself (%/ makes the pattern /*)
+    { [ -e "$apd/.git" ] || { [ -d "$apd/objects" ] && [ -d "$apd/refs" ] && [ -e "$apd/HEAD" ]; }; } && { echo "grok_media: auth dir '$apd' is a git repository (worktree or bare) — refusing to grant it" >&2; exit 1; }
+    case "$apd" in *[[:cntrl:]]*) echo "grok_media: resolved auth dir holds a control character — refusing (it would land in the TOML unescaped; the newline pre-check above only sees the RAW path, so a symlink into a directory whose NAME contains an LF resolves with that LF mid-string)" >&2; exit 1 ;; esac
+    case "$apd" in *'"'*|*'\'*) echo "grok_media: TOML-unsafe character in auth dir" >&2; exit 1 ;; esac
+    case "$apd" in *'*'*|*'?'*|*'['*) echo "grok_media: auth dir '$apd' holds a sandbox metacharacter (* ? [) — grok reads a TRAILING /* or /** as the PARENT directory (so a dir named * would silently widen the grant one level, past the bounds above) and skips any other glob entry; refusing" >&2; exit 1 ;; esac
+    __tb=$(printf '\t'); case "$apd" in ' '*|*' '|"$__tb"*|*"$__tb") echo "grok_media: auth dir has leading/trailing whitespace — grok skips such an entry, leaving the credential ungranted; refusing" >&2; exit 1 ;; esac
     printf '[profiles.relayauth]\nextends = "strict"\nread_write = ["%s"]\n' "$apd" > "$gkh/sandbox.toml" || { echo "grok_media: could not write sandbox profile" >&2; exit 1; }
     [ -s "$gkh/sandbox.toml" ] || { echo "grok_media: sandbox profile incomplete" >&2; exit 1; }
   fi
