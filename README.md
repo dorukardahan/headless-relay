@@ -43,6 +43,8 @@ is a single `git clone`; everything else on this page is detail for when you nee
 - **Second opinions**: hand a diff, a bug, a PR review, or a design question to GPT, GLM,
   Grok, Gemini, or Claude
 - **Consensus**: send the same prompt to several models in parallel and compare answers
+- **Party / Council Mode**: explicitly ask every safely available built-in and custom lane the
+  same frozen brief, preserve dissent, and synthesize only after recording unavailable or blocked lanes
 - **Image / video generation**: headless, through Codex, Gemini, or Grok (Grok under a hermetic
   `env -i` + empty HOME + clean temp GROK_HOME, only the four media tools allowed, media published
   atomically); Grok is
@@ -69,9 +71,11 @@ lives in `references/reprompter-relay.md`.
 | `SECURITY.md` | Grok's historical whole-repo upload: primary sources, xAI's 2026-07-15 open-source response, the source audit, and migration notes for anyone who ran an old Grok Build version |
 | `references/cli-reference.md` | Per-CLI flag tables, ZCode setup recipes, output shapes, troubleshooting |
 | `references/anthropic-terms.md` | Provider-terms compliance detail with citations |
-| `references/custom-targets.md` | Connect your own targets (local models via Ollama/LM Studio/MLX, any one-shot CLI) through `~/.agents/relay-targets.json` |
+| `references/custom-targets.md` | Connect your own targets (local models via Ollama, LM Studio/MLX, any one-shot CLI) through `~/.agents/relay-targets.json` |
+| `references/party-mode.md` | Party/Council workflow: all-lane preflight, frozen brief, resource-aware scheduling, artifact manifest, dissent-preserving synthesis, GREEN gate |
 | `references/reprompter-relay.md` | Pairing recipe for [RePrompter](https://github.com/AytuncYildizli/reprompter): structure the prompt first, then relay it |
 | `scripts/regression-grok-safety.sh` | Static text tripwire: fails if the Grok isolation safeguard or its security anchors regress |
+| `scripts/regression-party-mode.sh` | Static contract test for Party/Council triggers, all-lane roster, no auth churn/substitution, scheduling guards, dissent, and receipts |
 | `scripts/test-grok-runtime.sh` | Runtime counterpart to the tripwire: extracts the shipped `grok_relay` / `grok_media` from `SKILL.md` and exercises the isolation, process-lifecycle, and fail-closed publish matrix under sh/bash/zsh against a fake `grok` (real grok / network never touched), with mutation red-green checks |
 | `LICENSE.txt` | MIT license |
 
