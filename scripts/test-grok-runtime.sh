@@ -59,7 +59,7 @@ done
 # The auth-grant bounds are DUPLICATED per helper, so a scenario suite that drives only grok_relay
 # cannot see one deleted from grok_media. Require each bound EXACTLY TWICE (once per helper): that
 # closes the whole media-only-deletion class structurally, for every bound, without a scenario each.
-for anchor in 'profiles.relayauth' 'contains your home directory' 'is a git repository' 'does not hold' 'newline in auth path' 'sandbox metacharacter' 'leading/trailing whitespace' '-ef "$ap"'; do
+for anchor in 'profiles.relayauth' 'contains your home directory' 'is a git repository' 'does not hold' 'newline in auth path' 'sandbox metacharacter' 'leading/trailing whitespace' '-ef "$ap"' 'TOML-unsafe character in auth dir' 'auth directory not readable' 'is not the directory'; do
   _n=$(grep -c -- "$anchor" "$PRISTINE")
   [ "$_n" = 2 ] || { echo "FATAL: auth-grant bound must appear once per helper (2 total), found $_n: $anchor" >&2; exit 2; }
 done
@@ -487,6 +487,22 @@ authdir_resolve_decoy)
   [ "$rc" = 1 ] || fail "expected fail-closed exit 1, got $rc"
   grep -q 'does not hold' "$run/err" || fail "no identity message: [$(cat "$run/err")]"
   fake_ran && fail "SECURITY: a same-named decoy satisfied the resolved-dir check"
+  ok ;;
+
+authdir_dir_identity)
+  # the newline-free sibling holds a HARD LINK to the real credential, so file identity (-ef) is
+  # satisfied while the directory is still the wrong one. Only DIRECTORY identity refuses this.
+  setup_home; nl='
+'
+  mkdir -p "$run/hd$nl" "$run/hd"
+  cp "$realhome/.grok/auth.json" "$run/hd$nl/auth.json"
+  ln "$run/hd$nl/auth.json" "$run/hd/auth.json" || fail "hard link"   # SAME inode
+  ln -s "$run/hd$nl" "$run/hlink" || fail "symlink"
+  export GROK_AUTH_PATH="$run/hlink/auth.json"
+  grok_relay "q" >/dev/null 2>"$run/err"; rc=$?
+  [ "$rc" = 1 ] || fail "expected fail-closed exit 1, got $rc"
+  grep -q 'is not the directory' "$run/err" || fail "no directory-identity message: [$(cat "$run/err")]"
+  fake_ran && fail "SECURITY: a same-inode alias let the wrong directory be granted"
   ok ;;
 
 authdir_bare_repo_refuse)
@@ -993,7 +1009,7 @@ descendant_normal_exit descendant_nonzero_exit publish_sig_int publish_sig_term 
 media_timeout newline_failclosed artifact_spacename concurrent_rollback_isolation nohl_failclosed rollback_preserves_preexisting concurrent_reverse_timing \
 newline_output_dir dash_pgid_safety \
 sandbox_profile_sub sandbox_profile_apikey authdir_home_refuse authdir_repo_refuse authdir_symlink_escape authdir_toml_unsafe \
-sandbox_profile_media authdir_home_media_refuse authdir_newline_path authdir_resolve_mismatch authdir_resolve_decoy authdir_bare_repo_refuse authdir_glob_refuse"
+sandbox_profile_media authdir_home_media_refuse authdir_newline_path authdir_resolve_mismatch authdir_resolve_decoy authdir_dir_identity authdir_bare_repo_refuse authdir_glob_refuse"
 
 echo "=================================================================================="
 echo " grok_relay / grok_media — RUNTIME isolation proof (M6, fake grok, no network)"
@@ -1065,6 +1081,7 @@ if [ -n "$MUTSHELL" ]; then
   run_mut AH "TOML-safety bound on the auth dir removed"   authdir_toml_unsafe    's#TOML-unsafe character in auth dir" >&2; exit 1#TOML-unsafe character in auth dir" >\&2; true#g'
   run_mut AI "resolved-dir identity check removed"          authdir_resolve_mismatch 's#\[ "$apd/${ap##\*/}" -ef "$ap" \]#true#g'
   run_mut AN "identity check weakened to mere readability"  authdir_resolve_decoy    's#\[ "$apd/${ap##\*/}" -ef "$ap" \]#[ -r "$apd/${ap##*/}" ]#g'
+  run_mut AO "directory-identity bound removed"            authdir_dir_identity   's#\[ "$apd" -ef "$(dirname "$ap")" \]#true#g'
   run_mut AJ "bare-repository bound removed"               authdir_bare_repo_refuse 's#\[ -d "$apd/objects" \]#false#g'
   run_mut AK "newline pre-check line deleted"              authdir_newline_path   '/# BEFORE resolving:/d'
   run_mut AL "glob/metacharacter bound removed"            authdir_glob_refuse    's#skips any other glob entry; refusing" >&2; exit 1#skips any other glob entry; refusing" >\&2; true#g'

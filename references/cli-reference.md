@@ -343,7 +343,8 @@ relayauth_profile() (   # $1 = auth.json path, $2 = the temp GROK_HOME to write 
   [ -d "${2:-}" ] || exit 1
   [ "$(printf '%s' "$1" | wc -l | tr -d ' ')" = 0 ] || exit 1
   _apd=$(cd "$(dirname "$1")" 2>/dev/null && pwd -P) || exit 1
-  [ "$_apd/${1##*/}" -ef "$1" ] || exit 1   # identity (inode+device), not mere readability
+  [ "$_apd/${1##*/}" -ef "$1" ] || exit 1       # file identity (inode+device), not mere readability
+  [ "$_apd" -ef "$(dirname "$1")" ] || exit 1   # DIRECTORY identity: a same-inode alias cannot spoof this
   _hp=$(cd "$HOME" 2>/dev/null && pwd -P) || _hp=$HOME
   [ "$_apd" = / ] && exit 1
   case "$_hp/" in "${_apd%/}"/*) exit 1 ;; esac
