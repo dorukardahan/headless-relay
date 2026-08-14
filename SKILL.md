@@ -111,7 +111,7 @@ grok_relay() (
   key="${XAI_API_KEY:-${GROK_CODE_XAI_API_KEY:-}}"           # non-empty => API-key branch
   if [ -z "$key" ]; then                                     # subscription: grok precedence GROK_AUTH_PATH > $GROK_HOME/auth.json > $HOME/.grok/auth.json
     ap="${GROK_AUTH_PATH:-${GROK_HOME:-$HOME/.grok}/auth.json}"
-    case "$ap" in /*) ;; *) ap="$(pwd)/$ap" ;; esac          # absolutise before any cd
+    case "$ap" in /*) ;; *) [ "$(pwd)" -ef . ] || { echo "grok_relay: the working directory's name contains a newline — refusing to absolutise a relative auth path against it (command substitution would strip that newline and silently name a SIBLING directory's credential)" >&2; exit 1; }; ap="$(pwd)/$ap" ;; esac          # absolutise before any cd
     { [ -f "$ap" ] && [ -r "$ap" ]; } || { echo "grok_relay: no readable auth FILE at $ap — run 'grok login', or set XAI_API_KEY" >&2; exit 1; }   # -f, not just -r: a GROK_AUTH_PATH that names a directory (a typo dropping /auth.json) satisfies -r and both identity checks below, and would grant that directory's PARENT
   fi
   to=${GROK_RELAY_TIMEOUT:-300}; case "$to" in ''|*[!0-9]*) to=300 ;; esac; [ "$to" -gt 0 ] || to=300
@@ -276,7 +276,7 @@ grok_media() (
   key="${XAI_API_KEY:-${GROK_CODE_XAI_API_KEY:-}}"
   if [ -z "$key" ]; then
     ap="${GROK_AUTH_PATH:-${GROK_HOME:-$HOME/.grok}/auth.json}"
-    case "$ap" in /*) ;; *) ap="$(pwd)/$ap" ;; esac
+    case "$ap" in /*) ;; *) [ "$(pwd)" -ef . ] || { echo "grok_media: the working directory's name contains a newline — refusing to absolutise a relative auth path against it (command substitution would strip that newline and silently name a SIBLING directory's credential)" >&2; exit 1; }; ap="$(pwd)/$ap" ;; esac          # absolutise before any cd
     { [ -f "$ap" ] && [ -r "$ap" ]; } || { echo "grok_media: no readable auth FILE at $ap — run 'grok login', or set XAI_API_KEY" >&2; exit 1; }   # -f, not just -r: a GROK_AUTH_PATH that names a directory (a typo dropping /auth.json) satisfies -r and both identity checks below, and would grant that directory's PARENT
   fi
   to=${GROK_MEDIA_TIMEOUT:-600}; case "$to" in ''|*[!0-9]*) to=600 ;; esac; [ "$to" -gt 0 ] || to=600
