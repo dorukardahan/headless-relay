@@ -59,6 +59,8 @@ def run(cmd: list[str], timeout: int, cwd: str | None = None, env: dict | None =
 
     signal.signal(signal.SIGINT, _on_signal)
     signal.signal(signal.SIGTERM, _on_signal)
+    if hasattr(signal, "SIGHUP"):
+        signal.signal(signal.SIGHUP, _on_signal)
     try:
         proc = subprocess.Popen(
             cmd,

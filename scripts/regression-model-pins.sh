@@ -69,8 +69,8 @@ else
     echo "FAIL: print-model-catalog.sh no longer requires Grok model-list markers"
     fail=1
   }
-  grep -qF "trap '_cleanup_grok_tmp' EXIT INT TERM HUP" "$ROOT/scripts/print-model-catalog.sh" || {
-    echo "FAIL: print-model-catalog.sh no longer traps signals around Grok temp dirs"
+  grep -qF "trap '_stop_grok 130' INT" "$ROOT/scripts/print-model-catalog.sh" || {
+    echo "FAIL: print-model-catalog.sh no longer exits on SIGINT after Grok cleanup"
     fail=1
   }
   grep -qF 'run_to 5 codex --version' "$ROOT/scripts/print-model-catalog.sh" || {
@@ -97,6 +97,10 @@ else
   }
   grep -qF 'signal.SIGINT' "$ROOT/scripts/catalog_watchdog.py" || {
     echo "FAIL: catalog_watchdog.py no longer traps SIGINT"
+    fail=1
+  }
+  grep -qF 'SIGHUP' "$ROOT/scripts/catalog_watchdog.py" || {
+    echo "FAIL: catalog_watchdog.py no longer traps SIGHUP"
     fail=1
   }
   grep -qF 'os.environ.get("XAI_API_KEY")' "$ROOT/scripts/catalog_watchdog.py" || {

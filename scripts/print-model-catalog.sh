@@ -151,8 +151,18 @@ if have grok; then
   _cleanup_grok_tmp() {
     [ -n "${_gh:-}" ] && rm -rf "$_gh"
     [ -n "${_iso:-}" ] && rm -rf "$_iso"
+    _gh=
+    _iso=
   }
-  trap '_cleanup_grok_tmp' EXIT INT TERM HUP
+  _stop_grok() {
+    _cleanup_grok_tmp
+    trap - EXIT INT TERM HUP
+    exit "$1"
+  }
+  trap '_stop_grok 130' INT
+  trap '_stop_grok 143' TERM
+  trap '_stop_grok 129' HUP
+  trap '_cleanup_grok_tmp' EXIT
   _gh=$(mktemp -d "${TMPDIR:-/tmp}/grok-home.XXXXXX") || _gh=
   _iso=$(mktemp -d "${TMPDIR:-/tmp}/grok-iso.XXXXXX") || _iso=
   _grokbin=$(command -v grok)
