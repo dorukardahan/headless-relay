@@ -5,10 +5,14 @@
 # out of README/SKILL as if they were a live menu. This script asks each
 # installed CLI for its catalog and prints a dated, machine-local snapshot.
 #
-# WHAT IT IS NOT. It does not start a model turn, does not write credentials,
-# does not refresh vendor blogs, and does not update SKILL.md. Missing binaries
-# are skipped. A lane that is installed but whose catalog command fails is
-# reported as skipped, not as an empty menu.
+# WHAT IT IS NOT. It does not start a model turn, does not refresh vendor blogs,
+# and does not update SKILL.md. Missing binaries are skipped. A lane that is
+# installed but whose catalog command fails is reported as skipped, not as an
+# empty menu.
+# Grok subscription catalog (`grok models` with GROK_AUTH_PATH) MAY refresh an
+# expired access token in place on that auth.json — the CLI writes
+# `auth update disk written`. API-key mode (`XAI_API_KEY`) does not touch the
+# file. This is a catalog fetch, not a credential-free guarantee.
 #
 # Codex: use `codex debug models` (JSON). Never `codex models` — on the 0.144
 # series that is not a catalog subcommand and starts an interactive session.
@@ -103,19 +107,33 @@ echo
 # --- Grok ---
 # Catalog only. Same hermetic shape as the availability ladder in
 # references/cli-reference.md step 2: env -i allowlist, empty HOME, clean temp
-# GROK_HOME, auth via GROK_AUTH_PATH, 40s alarm. Not a model turn (no -p).
+# GROK_HOME, 40s alarm. Auth is ONE of: XAI_API_KEY (no auth file) OR
+# GROK_AUTH_PATH -> auth.json. Not a model turn (no -p). Subscription catalog
+# may refresh the named auth.json in place.
 echo "## Grok (\`grok models\`)"
 if have grok; then
   echo "binary: $(command -v grok)"
   _gh=$(mktemp -d "${TMPDIR:-/tmp}/grok-home.XXXXXX") || _gh=
   _iso=$(mktemp -d "${TMPDIR:-/tmp}/grok-iso.XXXXXX") || _iso=
-  _ap="${GROK_AUTH_PATH:-${GROK_HOME:-$HOME/.grok}/auth.json}"
   _grokbin=$(command -v grok)
+  _key="${XAI_API_KEY:-${GROK_CODE_XAI_API_KEY:-}}"
+  _ap="${GROK_AUTH_PATH:-${GROK_HOME:-$HOME/.grok}/auth.json}"
   if [ -z "$_gh" ] || [ -z "$_iso" ]; then
     echo "skip: mktemp failed"
-  elif [ ! -f "$_ap" ] || [ ! -r "$_ap" ]; then
-    echo "skip: no readable auth file (set GROK_AUTH_PATH or run grok login)"
-  else
+  elif [ -n "$_key" ]; then
+    _out=$(
+      cd "$_iso" && env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin \
+        HOME="$_gh" GROK_HOME="$_gh" TMPDIR="$_gh" TERM=dumb \
+        GROK_TELEMETRY_ENABLED=false GROK_TELEMETRY_TRACE_UPLOAD=false \
+        GROK_EXTERNAL_OTEL=false XAI_API_KEY="$_key" \
+        perl -e 'alarm shift; exec @ARGV' 40 "$_grokbin" models 2>/dev/null
+    ) || _out=
+    if [ -n "$_out" ]; then
+      printf '%s\n' "$_out"
+    else
+      echo "skip: isolated \`grok models\` (API-key) failed or timed out"
+    fi
+  elif [ -f "$_ap" ] && [ -r "$_ap" ]; then
     _out=$(
       cd "$_iso" && env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin \
         HOME="$_gh" GROK_HOME="$_gh" TMPDIR="$_gh" TERM=dumb \
@@ -128,6 +146,8 @@ if have grok; then
     else
       echo "skip: isolated \`grok models\` failed or timed out"
     fi
+  else
+    echo "skip: no XAI_API_KEY and no readable auth file (set GROK_AUTH_PATH or run grok login)"
   fi
   [ -n "${_gh:-}" ] && rm -rf "$_gh"
   [ -n "${_iso:-}" ] && rm -rf "$_iso"

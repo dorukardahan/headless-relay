@@ -41,6 +41,14 @@ else
     echo "FAIL: print-model-catalog.sh Grok catalog lost GROK_AUTH_PATH"
     fail=1
   }
+  grep -qF 'XAI_API_KEY' "$ROOT/scripts/print-model-catalog.sh" || {
+    echo "FAIL: print-model-catalog.sh Grok catalog lost the API-key auth branch"
+    fail=1
+  }
+  grep -qF 'auth update disk written' "$ROOT/scripts/print-model-catalog.sh" || {
+    echo "FAIL: print-model-catalog.sh no longer discloses in-place Grok token refresh"
+    fail=1
+  }
 fi
 
 grep -qF 'scripts/print-model-catalog.sh' "$ROOT/README.md" || {
