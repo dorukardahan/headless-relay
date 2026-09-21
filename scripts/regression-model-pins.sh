@@ -65,6 +65,10 @@ else
     echo "FAIL: print-model-catalog.sh no longer discloses in-place Grok token refresh"
     fail=1
   }
+  grep -qF 'Available models:|Default model:' "$ROOT/scripts/print-model-catalog.sh" || {
+    echo "FAIL: print-model-catalog.sh no longer requires Grok model-list markers"
+    fail=1
+  }
 fi
 
 if [ ! -s "$ROOT/scripts/catalog_watchdog.py" ]; then
@@ -77,6 +81,10 @@ else
   }
   grep -qF 'os.killpg(pgid, 0)' "$ROOT/scripts/catalog_watchdog.py" || {
     echo "FAIL: catalog_watchdog.py no longer probes the group after the leader exits"
+    fail=1
+  }
+  grep -qF 'Leader may have exited while a background worker' "$ROOT/scripts/catalog_watchdog.py" || {
+    echo "FAIL: catalog_watchdog.py no longer reaps leftover workers after a normal exit"
     fail=1
   }
   grep -qF 'signal.SIGINT' "$ROOT/scripts/catalog_watchdog.py" || {

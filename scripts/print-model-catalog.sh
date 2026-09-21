@@ -71,6 +71,11 @@ run_grok_catalog() {
   fi
 }
 
+# Availability ladder: a catalog is real only if it lists models.
+accept_grok_catalog() {
+  printf '%s\n' "$1" | grep -qE 'Available models:|Default model:'
+}
+
 # --- Codex ---
 echo "## Codex (\`codex debug models\`)"
 if have codex; then
@@ -161,10 +166,10 @@ if have grok; then
   elif [ -n "$_key" ]; then
     # Key stays in this shell env; catalog_watchdog inherits it. Never argv.
     _out=$(run_grok_catalog 40 "$_grokbin" "$_iso" "$_gh") || _out=
-    if [ -n "$_out" ]; then
+    if accept_grok_catalog "$_out"; then
       printf '%s\n' "$_out"
     else
-      echo "skip: isolated \`grok models\` (API-key) failed or timed out"
+      echo "skip: isolated \`grok models\` (API-key) failed, timed out, or printed no model list"
     fi
   else
     # Subscription branch only: do not expand $HOME until we know we need a file.
@@ -192,10 +197,10 @@ if have grok; then
     esac
     if [ -n "$_ap" ] && [ -f "$_ap" ] && [ -r "$_ap" ]; then
       _out=$(run_grok_catalog 40 "$_grokbin" "$_iso" "$_gh" "$_ap") || _out=
-      if [ -n "$_out" ]; then
+      if accept_grok_catalog "$_out"; then
         printf '%s\n' "$_out"
       else
-        echo "skip: isolated \`grok models\` failed or timed out"
+        echo "skip: isolated \`grok models\` failed, timed out, or printed no model list"
       fi
     elif [ -n "$_ap" ]; then
       echo "skip: no readable auth file at the resolved path (set GROK_AUTH_PATH or run grok login)"

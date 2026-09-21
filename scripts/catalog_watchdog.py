@@ -80,6 +80,8 @@ def run(cmd: list[str], timeout: int, cwd: str | None = None, env: dict | None =
     except Exception:
         reap_group(proc, pgid)
         return 1, ""
+    # Leader may have exited while a background worker kept the group alive.
+    reap_group(proc, pgid)
     return (0 if proc.returncode == 0 else (proc.returncode or 1)), (out or "")
 
 
