@@ -77,6 +77,10 @@ else
     echo "FAIL: print-model-catalog.sh Codex --version probe is unbounded"
     fail=1
   }
+  grep -qF '_gh=$(cd "$_gh" && pwd)' "$ROOT/scripts/print-model-catalog.sh" || {
+    echo "FAIL: print-model-catalog.sh no longer absolutizes Grok temp dirs"
+    fail=1
+  }
 fi
 
 if [ ! -s "$ROOT/scripts/catalog_watchdog.py" ]; then
@@ -103,6 +107,10 @@ else
     echo "FAIL: catalog_watchdog.py no longer traps SIGHUP"
     fail=1
   }
+  if grep -qE 'str \| None|list\[str\]|dict\[str' "$ROOT/scripts/catalog_watchdog.py"; then
+    echo "FAIL: catalog_watchdog.py still uses PEP 604 / 3.9-incompatible annotations"
+    fail=1
+  fi
   grep -qF 'os.environ.get("XAI_API_KEY")' "$ROOT/scripts/catalog_watchdog.py" || {
     echo "FAIL: catalog_watchdog.py no longer reads the API key from the environment"
     fail=1

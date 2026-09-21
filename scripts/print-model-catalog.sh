@@ -165,6 +165,11 @@ if have grok; then
   trap '_cleanup_grok_tmp' EXIT
   _gh=$(mktemp -d "${TMPDIR:-/tmp}/grok-home.XXXXXX") || _gh=
   _iso=$(mktemp -d "${TMPDIR:-/tmp}/grok-iso.XXXXXX") || _iso=
+  # mktemp may return a relative path when TMPDIR is relative. Absolutize
+  # before the watchdog cds into $_iso — otherwise Grok resolves HOME from
+  # inside that dir and misses the synthetic home we created.
+  [ -n "$_gh" ] && _gh=$(cd "$_gh" && pwd)
+  [ -n "$_iso" ] && _iso=$(cd "$_iso" && pwd)
   _grokbin=$(command -v grok)
   case "$_grokbin" in
     "") ;;

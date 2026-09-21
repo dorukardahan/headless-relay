@@ -8,8 +8,6 @@ injects it only into the child's env.
 On timeout, INT, or TERM: SIGTERM the whole group, then SIGKILL remaining
 members even if the leader already exited (forked workers that ignore TERM).
 """
-from __future__ import annotations
-
 import argparse
 import os
 import signal
@@ -48,9 +46,11 @@ def reap_group(proc: subprocess.Popen, pgid: int) -> None:
         pass
 
 
-def run(cmd: list[str], timeout: int, cwd: str | None = None, env: dict | None = None) -> tuple[int, str]:
-    proc: subprocess.Popen | None = None
-    pgid: int | None = None
+def run(cmd, timeout, cwd=None, env=None):
+    # Runtime-plain values so python3.9 (and the advertised unversioned
+    # python3) can import this module. No PEP 604 unions.
+    proc = None
+    pgid = None
 
     def _on_signal(signum: int, _frame) -> None:
         if proc is not None and pgid is not None:
@@ -87,7 +87,7 @@ def run(cmd: list[str], timeout: int, cwd: str | None = None, env: dict | None =
     return (0 if proc.returncode == 0 else (proc.returncode or 1)), (out or "")
 
 
-def grok_env(home: str, auth_path: str) -> dict[str, str]:
+def grok_env(home, auth_path):
     env = {
         "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
         "HOME": home,
