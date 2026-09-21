@@ -17,7 +17,8 @@
 # Codex: use `codex debug models` (JSON). Never `codex models` — on the 0.144
 # series that is not a catalog subcommand and starts an interactive session.
 #
-# No dependencies beyond POSIX sh + python3 (for Codex JSON). Run from anywhere.
+# No dependencies beyond POSIX sh + python3 (Codex JSON + per-lane watchdogs).
+# Perl is not required.
 
 set -eu
 
@@ -30,6 +31,29 @@ echo "Do not commit it as the skill's source of truth."
 echo
 
 have() { command -v "$1" >/dev/null 2>&1; }
+
+if ! have python3; then
+  echo "python3 is required (Codex JSON parse + catalog watchdogs)."
+  exit 1
+fi
+
+# Bound a catalog CLI: print stdout on success, else empty. Never hangs the script.
+# Usage: _out=$(run_to SECS CMD [args...]) || _out=
+run_to() {
+  python3 - "$@" <<'PY'
+import subprocess, sys
+secs = int(sys.argv[1])
+cmd = sys.argv[2:]
+try:
+    p = subprocess.run(cmd, capture_output=True, text=True, timeout=secs)
+except subprocess.TimeoutExpired:
+    sys.exit(124)
+except Exception:
+    sys.exit(1)
+sys.stdout.write(p.stdout or "")
+sys.exit(0 if p.returncode == 0 else (p.returncode or 1))
+PY
+}
 
 # --- Codex ---
 echo "## Codex (\`codex debug models\`)"
@@ -90,14 +114,11 @@ echo
 echo "## Gemini (\`agy models\`)"
 if have agy; then
   echo "binary: $(command -v agy)"
-  if _out=$(agy models 2>/dev/null); then
-    if [ -n "$_out" ]; then
-      printf '%s\n' "$_out"
-    else
-      echo "skip: empty catalog"
-    fi
+  _out=$(run_to 20 agy models) || _out=
+  if [ -n "$_out" ]; then
+    printf '%s\n' "$_out"
   else
-    echo "skip: \`agy models\` failed (not logged in?)"
+    echo "skip: \`agy models\` failed, timed out, or not logged in"
   fi
 else
   echo "skip: \`agy\` not on PATH"
@@ -107,7 +128,7 @@ echo
 # --- Grok ---
 # Catalog only. Same hermetic shape as the availability ladder in
 # references/cli-reference.md step 2: env -i allowlist, empty HOME, clean temp
-# GROK_HOME, 40s alarm. Auth is ONE of: XAI_API_KEY (no auth file) OR
+# GROK_HOME, 40s python watchdog. Auth is ONE of: XAI_API_KEY (no auth file) OR
 # GROK_AUTH_PATH -> auth.json. Not a model turn (no -p). Subscription catalog
 # may refresh the named auth.json in place.
 echo "## Grok (\`grok models\`)"
@@ -121,11 +142,11 @@ if have grok; then
     echo "skip: mktemp failed"
   elif [ -n "$_key" ]; then
     _out=$(
-      cd "$_iso" && env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin \
+      cd "$_iso" && run_to 40 env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin \
         HOME="$_gh" GROK_HOME="$_gh" TMPDIR="$_gh" TERM=dumb \
         GROK_TELEMETRY_ENABLED=false GROK_TELEMETRY_TRACE_UPLOAD=false \
         GROK_EXTERNAL_OTEL=false XAI_API_KEY="$_key" \
-        perl -e 'alarm shift; exec @ARGV' 40 "$_grokbin" models 2>/dev/null
+        "$_grokbin" models
     ) || _out=
     if [ -n "$_out" ]; then
       printf '%s\n' "$_out"
@@ -158,11 +179,11 @@ if have grok; then
     esac
     if [ -n "$_ap" ] && [ -f "$_ap" ] && [ -r "$_ap" ]; then
       _out=$(
-        cd "$_iso" && env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin \
+        cd "$_iso" && run_to 40 env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin \
           HOME="$_gh" GROK_HOME="$_gh" TMPDIR="$_gh" TERM=dumb \
           GROK_TELEMETRY_ENABLED=false GROK_TELEMETRY_TRACE_UPLOAD=false \
           GROK_EXTERNAL_OTEL=false GROK_AUTH_PATH="$_ap" \
-          perl -e 'alarm shift; exec @ARGV' 40 "$_grokbin" models 2>/dev/null
+          "$_grokbin" models
       ) || _out=
       if [ -n "$_out" ]; then
         printf '%s\n' "$_out"

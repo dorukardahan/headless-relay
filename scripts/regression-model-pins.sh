@@ -33,10 +33,18 @@ else
     echo "FAIL: print-model-catalog.sh Grok catalog lost hermetic env -i"
     fail=1
   }
-  grep -qF "perl -e 'alarm shift; exec @ARGV' 40" "$ROOT/scripts/print-model-catalog.sh" || {
-    echo "FAIL: print-model-catalog.sh Grok catalog lost the 40s alarm timeout"
+  grep -qF 'run_to 20 agy models' "$ROOT/scripts/print-model-catalog.sh" || {
+    echo "FAIL: print-model-catalog.sh Gemini catalog lost the 20s watchdog"
     fail=1
   }
+  grep -qF 'run_to 40 env -i' "$ROOT/scripts/print-model-catalog.sh" || {
+    echo "FAIL: print-model-catalog.sh Grok catalog lost the isolated 40s watchdog"
+    fail=1
+  }
+  if grep -qF 'perl -e' "$ROOT/scripts/print-model-catalog.sh"; then
+    echo "FAIL: print-model-catalog.sh still depends on Perl for the watchdog"
+    fail=1
+  fi
   grep -qF 'GROK_AUTH_PATH' "$ROOT/scripts/print-model-catalog.sh" || {
     echo "FAIL: print-model-catalog.sh Grok catalog lost GROK_AUTH_PATH"
     fail=1
