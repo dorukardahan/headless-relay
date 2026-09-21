@@ -29,16 +29,20 @@ else
     fail=1
   }
   # Grok catalog must stay isolated + bounded (availability ladder step 2).
-  grep -qF 'env -i' "$ROOT/scripts/print-model-catalog.sh" || {
-    echo "FAIL: print-model-catalog.sh Grok catalog lost hermetic env -i"
+  grep -qF -- '--hermetic-home' "$ROOT/scripts/print-model-catalog.sh" || {
+    echo "FAIL: print-model-catalog.sh Grok catalog lost hermetic-home isolation"
     fail=1
   }
   grep -qF 'run_to 20 agy models' "$ROOT/scripts/print-model-catalog.sh" || {
     echo "FAIL: print-model-catalog.sh Gemini catalog lost the 20s watchdog"
     fail=1
   }
-  grep -qF 'start_new_session=True' "$ROOT/scripts/print-model-catalog.sh" || {
-    echo "FAIL: print-model-catalog.sh watchdog no longer starts a new process group"
+  grep -qF 'run_to 20 codex debug models' "$ROOT/scripts/print-model-catalog.sh" || {
+    echo "FAIL: print-model-catalog.sh Codex catalog lost the 20s group watchdog"
+    fail=1
+  }
+  grep -qF 'catalog_watchdog.py' "$ROOT/scripts/print-model-catalog.sh" || {
+    echo "FAIL: print-model-catalog.sh no longer uses catalog_watchdog.py"
     fail=1
   }
   grep -qF 'run_grok_catalog' "$ROOT/scripts/print-model-catalog.sh" || {
@@ -49,28 +53,38 @@ else
     echo "FAIL: print-model-catalog.sh still interpolates XAI_API_KEY onto a command line"
     fail=1
   fi
-  grep -qF 'os.environ.get("XAI_API_KEY")' "$ROOT/scripts/print-model-catalog.sh" || {
-    echo "FAIL: print-model-catalog.sh no longer reads the API key from the environment"
-    fail=1
-  }
-  grep -qF 'GROK_AUTH_PATH' "$ROOT/scripts/print-model-catalog.sh" || {
-    echo "FAIL: print-model-catalog.sh Grok catalog lost GROK_AUTH_PATH"
-    fail=1
-  }
-  grep -qF 'XAI_API_KEY' "$ROOT/scripts/print-model-catalog.sh" || {
-    echo "FAIL: print-model-catalog.sh Grok catalog lost the API-key auth branch"
-    fail=1
-  }
   grep -qF '${HOME:-}' "$ROOT/scripts/print-model-catalog.sh" || {
     echo "FAIL: print-model-catalog.sh no longer guards \$HOME under set -u in the subscription branch"
     fail=1
   }
   grep -qF '$(pwd)/$_ap' "$ROOT/scripts/print-model-catalog.sh" || {
-    echo "FAIL: print-model-catalog.sh no longer absolutizes a relative GROK_AUTH_PATH before cd"
+    echo "FAIL: print-model-catalog.sh no longer absolutizes a relative GROK_AUTH_PATH before isolation"
     fail=1
   }
   grep -qF 'auth update disk written' "$ROOT/scripts/print-model-catalog.sh" || {
     echo "FAIL: print-model-catalog.sh no longer discloses in-place Grok token refresh"
+    fail=1
+  }
+fi
+
+if [ ! -s "$ROOT/scripts/catalog_watchdog.py" ]; then
+  echo "FAIL: scripts/catalog_watchdog.py is missing"
+  fail=1
+else
+  grep -qF 'start_new_session=True' "$ROOT/scripts/catalog_watchdog.py" || {
+    echo "FAIL: catalog_watchdog.py no longer starts a new process group"
+    fail=1
+  }
+  grep -qF 'os.killpg(pgid, 0)' "$ROOT/scripts/catalog_watchdog.py" || {
+    echo "FAIL: catalog_watchdog.py no longer probes the group after the leader exits"
+    fail=1
+  }
+  grep -qF 'signal.SIGINT' "$ROOT/scripts/catalog_watchdog.py" || {
+    echo "FAIL: catalog_watchdog.py no longer traps SIGINT"
+    fail=1
+  }
+  grep -qF 'os.environ.get("XAI_API_KEY")' "$ROOT/scripts/catalog_watchdog.py" || {
+    echo "FAIL: catalog_watchdog.py no longer reads the API key from the environment"
     fail=1
   }
 fi

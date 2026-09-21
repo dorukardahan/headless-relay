@@ -17,10 +17,12 @@
 # Codex: use `codex debug models` (JSON). Never `codex models` — on the 0.144
 # series that is not a catalog subcommand and starts an interactive session.
 #
-# No dependencies beyond POSIX sh + python3 (Codex JSON + per-lane watchdogs).
-# Perl is not required.
+# No dependencies beyond POSIX sh + python3 (Codex JSON + per-lane watchdogs
+# in scripts/catalog_watchdog.py). Perl is not required.
 
 set -eu
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+WATCHDOG="$ROOT/scripts/catalog_watchdog.py"
 
 echo "# headless-relay local model catalog"
 echo
@@ -36,126 +38,37 @@ if ! have python3; then
   echo "python3 is required (Codex JSON parse + catalog watchdogs)."
   exit 1
 fi
+if [ ! -f "$WATCHDOG" ]; then
+  echo "missing $WATCHDOG"
+  exit 1
+fi
 
 # Bound a catalog CLI: print stdout on success, else empty. Never hangs the script.
-# Starts the command in its own process group and reaps the group on timeout
-# (agy/grok workers that fork would otherwise outlive subprocess.run's child).
+# catalog_watchdog.py starts a new process group, TERMs then KILLs remaining
+# members even if the leader already exited, and reaps on INT/TERM.
 # Usage: _out=$(run_to SECS CMD [args...]) || _out=
 # Never pass secrets as CMD args — they land in the watchdog argv.
 run_to() {
-  python3 - "$@" <<'PY'
-import os, signal, subprocess, sys
-secs = int(sys.argv[1])
-cmd = sys.argv[2:]
-try:
-    p = subprocess.Popen(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-        text=True,
-        start_new_session=True,
-    )
-except Exception:
-    sys.exit(1)
-
-def _reap_group(proc):
-    try:
-        os.killpg(proc.pid, signal.SIGTERM)
-    except ProcessLookupError:
-        return
-    try:
-        proc.wait(timeout=2)
-        return
-    except subprocess.TimeoutExpired:
-        pass
-    try:
-        os.killpg(proc.pid, signal.SIGKILL)
-    except ProcessLookupError:
-        pass
-    try:
-        proc.wait(timeout=2)
-    except subprocess.TimeoutExpired:
-        pass
-
-try:
-    out, _err = p.communicate(timeout=secs)
-except subprocess.TimeoutExpired:
-    _reap_group(p)
-    sys.exit(124)
-except Exception:
-    _reap_group(p)
-    sys.exit(1)
-sys.stdout.write(out or "")
-sys.exit(0 if p.returncode == 0 else (p.returncode or 1))
-PY
+  python3 "$WATCHDOG" --timeout "$@"
 }
 
 # Isolated Grok catalog. Seconds, grokbin, iso dir, synthetic home, optional auth path.
 # API key is inherited from this shell's environment — never placed in argv.
 run_grok_catalog() {
-  python3 - "$1" "$2" "$3" "$4" "${5:-}" <<'PY'
-import os, signal, subprocess, sys
-secs, grokbin, iso, home, auth_path = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5]
-env = {
-    "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
-    "HOME": home,
-    "GROK_HOME": home,
-    "TMPDIR": home,
-    "TERM": "dumb",
-    "GROK_TELEMETRY_ENABLED": "false",
-    "GROK_TELEMETRY_TRACE_UPLOAD": "false",
-    "GROK_EXTERNAL_OTEL": "false",
-}
-if auth_path:
-    env["GROK_AUTH_PATH"] = auth_path
-else:
-    key = os.environ.get("XAI_API_KEY") or os.environ.get("GROK_CODE_XAI_API_KEY") or ""
-    if not key:
-        sys.exit(1)
-    env["XAI_API_KEY"] = key
-try:
-    p = subprocess.Popen(
-        [grokbin, "models"],
-        cwd=iso,
-        env=env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-        text=True,
-        start_new_session=True,
-    )
-except Exception:
-    sys.exit(1)
-
-def _reap_group(proc):
-    try:
-        os.killpg(proc.pid, signal.SIGTERM)
-    except ProcessLookupError:
-        return
-    try:
-        proc.wait(timeout=2)
-        return
-    except subprocess.TimeoutExpired:
-        pass
-    try:
-        os.killpg(proc.pid, signal.SIGKILL)
-    except ProcessLookupError:
-        pass
-    try:
-        proc.wait(timeout=2)
-    except subprocess.TimeoutExpired:
-        pass
-
-try:
-    out, _err = p.communicate(timeout=int(secs))
-except subprocess.TimeoutExpired:
-    _reap_group(p)
-    sys.exit(124)
-except Exception:
-    _reap_group(p)
-    sys.exit(1)
-sys.stdout.write(out or "")
-sys.exit(0 if p.returncode == 0 else (p.returncode or 1))
-PY
+  _secs=$1
+  _bin=$2
+  _iso=$3
+  _home=$4
+  _auth=${5:-}
+  if [ -n "$_auth" ]; then
+    python3 "$WATCHDOG" --timeout "$_secs" --cwd "$_iso" \
+      --hermetic-home "$_home" --auth-path "$_auth" \
+      "$_bin" models
+  else
+    python3 "$WATCHDOG" --timeout "$_secs" --cwd "$_iso" \
+      --hermetic-home "$_home" \
+      "$_bin" models
+  fi
 }
 
 # --- Codex ---
@@ -163,21 +76,15 @@ echo "## Codex (\`codex debug models\`)"
 if have codex; then
   echo "binary: $(command -v codex)"
   echo "version: $(codex --version 2>/dev/null | head -n 1 || echo unknown)"
-  if python3 - <<'PY'
-import json, subprocess, sys
+  _raw=$(run_to 20 codex debug models) || _raw=
+  if [ -z "$_raw" ]; then
+    echo "skip: catalog command failed or timed out"
+  else
+    printf '%s\n' "$_raw" | python3 -c '
+import json, sys
+raw = sys.stdin.read()
 try:
-    p = subprocess.run(
-        ["codex", "debug", "models"],
-        capture_output=True, text=True, timeout=20,
-    )
-except Exception as e:
-    print("skip: %s" % type(e).__name__)
-    sys.exit(0)
-if p.returncode != 0:
-    print("skip: catalog command failed")
-    sys.exit(0)
-try:
-    data = json.loads(p.stdout or "")
+    data = json.loads(raw)
 except json.JSONDecodeError:
     print("skip: catalog was not JSON")
     sys.exit(0)
@@ -200,11 +107,7 @@ if not ids:
     sys.exit(0)
 for i in ids:
     print("- %s" % i)
-PY
-  then
-    :
-  else
-    echo "skip: python3 catalog parse failed"
+'
   fi
   echo
   echo "Do **not** run \`codex models\`. On 0.144 that starts a session."
@@ -256,7 +159,7 @@ if have grok; then
   if [ -z "$_gh" ] || [ -z "$_iso" ] || [ -z "$_grokbin" ]; then
     [ -z "$_grokbin" ] || echo "skip: mktemp failed"
   elif [ -n "$_key" ]; then
-    # Key stays in this shell env; run_grok_catalog inherits it. Never argv.
+    # Key stays in this shell env; catalog_watchdog inherits it. Never argv.
     _out=$(run_grok_catalog 40 "$_grokbin" "$_iso" "$_gh") || _out=
     if [ -n "$_out" ]; then
       printf '%s\n' "$_out"
@@ -278,7 +181,7 @@ if have grok; then
       "") echo "skip: no XAI_API_KEY and no auth path (set GROK_AUTH_PATH / GROK_HOME / HOME, or run grok login)" ;;
       /*) ;;
       *)
-        # Absolutize before cd into $_iso — same rule as grok_relay.
+        # Absolutize before isolation — same rule as grok_relay.
         if [ "$(pwd)" -ef . ]; then
           _ap="$(pwd)/$_ap"
         else
