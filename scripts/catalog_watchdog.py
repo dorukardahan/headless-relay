@@ -5,8 +5,11 @@ Used by print-model-catalog.sh. Never pass secrets on argv: Grok API-key
 mode inherits XAI_API_KEY / GROK_CODE_XAI_API_KEY from the environment and
 injects it only into the child's env.
 
-On timeout, INT, or TERM: SIGTERM the whole group, then SIGKILL remaining
-members even if the leader already exited (forked workers that ignore TERM).
+On timeout, INT, TERM, or HUP: SIGTERM the whole group, then SIGKILL remaining
+members, but only while this process still owns the group (pgid == leader pid).
+After the catalog CLI's own normal/nonzero exit the watchdog does NOT signal
+the group — the leader is already reaped and that pgid could be reused
+(same rule as grok_relay; see SECURITY.md).
 """
 import argparse
 import os
@@ -15,8 +18,23 @@ import subprocess
 import sys
 
 
-def reap_group(proc: subprocess.Popen, pgid: int) -> None:
-    """TERM then KILL the process group. Leader exit is not enough."""
+def reap_group(proc, pgid):
+    """TERM then KILL the process group, only while we still own it.
+
+    Must be called while the leader is still this process's child. After
+    wait/communicate has reaped the leader, do not signal the pgid — it
+    may already belong to someone else (SECURITY.md descendant-cleanup).
+    """
+    if proc is None or pgid is None:
+        return
+    if proc.poll() is not None:
+        return
+    try:
+        live_pgid = os.getpgid(proc.pid)
+    except OSError:
+        return
+    if live_pgid != proc.pid or live_pgid != pgid:
+        return
     try:
         os.killpg(pgid, signal.SIGTERM)
     except ProcessLookupError:
@@ -25,16 +43,12 @@ def reap_group(proc: subprocess.Popen, pgid: int) -> None:
         pass
     try:
         proc.wait(timeout=2)
+        return
     except Exception:
         pass
-    # Leader may have died while a worker ignored TERM. Probe the group.
     try:
-        os.killpg(pgid, 0)
-    except ProcessLookupError:
-        return
-    except OSError:
-        pass
-    try:
+        if os.getpgid(proc.pid) != proc.pid:
+            return
         os.killpg(pgid, signal.SIGKILL)
     except ProcessLookupError:
         return
@@ -82,8 +96,7 @@ def run(cmd, timeout, cwd=None, env=None):
     except Exception:
         reap_group(proc, pgid)
         return 1, ""
-    # Leader may have exited while a background worker kept the group alive.
-    reap_group(proc, pgid)
+    # Leader already reaped. Do not killpg — pgid may have been reused.
     return (0 if proc.returncode == 0 else (proc.returncode or 1)), (out or "")
 
 

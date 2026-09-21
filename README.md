@@ -79,7 +79,7 @@ lives in `references/reprompter-relay.md`.
 | `scripts/regression-grok-safety.sh` | Static text tripwire: fails if the Grok isolation safeguard or its security anchors regress |
 | `scripts/test-grok-runtime.sh` | Runtime counterpart to the tripwire: extracts the shipped `grok_relay` / `grok_media` from `SKILL.md` and exercises the isolation, process-lifecycle, and fail-closed publish matrix under sh/bash/zsh against a fake `grok` (real grok / network never touched), with mutation red-green checks |
 | `scripts/print-model-catalog.sh` | Machine-local catalog: asks installed CLIs which model ids they serve *today*. Not a published menu. |
-| `scripts/catalog_watchdog.py` | Process-group watchdog used by the catalog (timeout, INT/TERM, leftover-worker kill). Secrets stay out of argv. |
+| `scripts/catalog_watchdog.py` | Process-group watchdog used by the catalog (timeout / INT / TERM / HUP). After a normal CLI exit it does not `killpg` — that pgid could already be reused. Secrets stay out of argv. |
 | `scripts/regression-model-pins.sh` | Static tripwire: fails if docs teach `codex models` as a catalog (that starts a session on 0.144) |
 | `LICENSE.txt` | MIT license |
 

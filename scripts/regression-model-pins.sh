@@ -95,14 +95,14 @@ else
     echo "FAIL: catalog_watchdog.py no longer starts a new process group"
     fail=1
   }
-  grep -qF 'os.killpg(pgid, 0)' "$ROOT/scripts/catalog_watchdog.py" || {
-    echo "FAIL: catalog_watchdog.py no longer probes the group after the leader exits"
+  grep -qF 'live_pgid != proc.pid' "$ROOT/scripts/catalog_watchdog.py" || {
+    echo "FAIL: catalog_watchdog.py no longer verifies the leader still owns its pgid before killpg"
     fail=1
   }
-  grep -qF 'Leader may have exited while a background worker' "$ROOT/scripts/catalog_watchdog.py" || {
-    echo "FAIL: catalog_watchdog.py no longer reaps leftover workers after a normal exit"
+  if grep -qF 'Leader may have exited while a background worker' "$ROOT/scripts/catalog_watchdog.py"; then
+    echo "FAIL: catalog_watchdog.py still killpg's after the leader was reaped (PID-reuse)"
     fail=1
-  }
+  fi
   grep -qF 'signal.SIGINT' "$ROOT/scripts/catalog_watchdog.py" || {
     echo "FAIL: catalog_watchdog.py no longer traps SIGINT"
     fail=1
