@@ -114,14 +114,17 @@ def main() -> None:
     parser.add_argument("--cwd")
     parser.add_argument("--hermetic-home", help="build the isolated Grok env with this HOME/GROK_HOME")
     parser.add_argument("--auth-path", default="", help="GROK_AUTH_PATH; omit to use XAI_API_KEY from env")
-    parser.add_argument("cmd", nargs="+")
+    parser.add_argument("cmd", nargs=argparse.REMAINDER)
     args = parser.parse_args()
     env = None
     cwd = args.cwd
     if args.hermetic_home:
         env = grok_env(args.hermetic_home, args.auth_path)
         cwd = cwd or args.hermetic_home
-    rc, out = run(args.cmd, args.timeout, cwd=cwd, env=env)
+    if not args.cmd or args.cmd == ["--"]:
+        parser.error("missing catalog command")
+    cmd = args.cmd[1:] if args.cmd[:1] == ["--"] else args.cmd
+    rc, out = run(cmd, args.timeout, cwd=cwd, env=env)
     sys.stdout.write(out)
     raise SystemExit(rc)
 

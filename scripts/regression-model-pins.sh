@@ -81,6 +81,10 @@ else
     echo "FAIL: print-model-catalog.sh no longer absolutizes Grok temp dirs"
     fail=1
   }
+  grep -qF 'python3 "$WATCHDOG" --timeout "$_secs" -- "$@"' "$ROOT/scripts/print-model-catalog.sh" || {
+    echo "FAIL: print-model-catalog.sh no longer separates child args from watchdog options"
+    fail=1
+  }
 fi
 
 if [ ! -s "$ROOT/scripts/catalog_watchdog.py" ]; then

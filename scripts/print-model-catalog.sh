@@ -49,7 +49,9 @@ fi
 # Usage: _out=$(run_to SECS CMD [args...]) || _out=
 # Never pass secrets as CMD args — they land in the watchdog argv.
 run_to() {
-  python3 "$WATCHDOG" --timeout "$@"
+  _secs=$1
+  shift
+  python3 "$WATCHDOG" --timeout "$_secs" -- "$@"
 }
 
 # Isolated Grok catalog. Seconds, grokbin, iso dir, synthetic home, optional auth path.
@@ -62,11 +64,11 @@ run_grok_catalog() {
   _auth=${5:-}
   if [ -n "$_auth" ]; then
     python3 "$WATCHDOG" --timeout "$_secs" --cwd "$_iso" \
-      --hermetic-home "$_home" --auth-path "$_auth" \
+      --hermetic-home "$_home" --auth-path "$_auth" -- \
       "$_bin" models
   else
     python3 "$WATCHDOG" --timeout "$_secs" --cwd "$_iso" \
-      --hermetic-home "$_home" \
+      --hermetic-home "$_home" -- \
       "$_bin" models
   fi
 }
