@@ -514,6 +514,9 @@ substitute a different model to fill the gap.
 | Claude | in-session already (native subagent); `command -v claude` only for headless | current session auth |
 
 Rules:
+- Example model ids in this skill are copy-paste pins, not a live menu. On this machine, run
+  `sh scripts/print-model-catalog.sh` (catalog-only: `codex debug models`, `agy models`,
+  `grok models`). Do not run `codex models` — on 0.144 that starts a session.
 - Missing binary or failed auth means that model is unavailable. Report it plainly ("Grok CLI not
   installed / not logged in — skipping") and continue with the models that ARE available.
 - If the user asked for ONLY an unavailable model, stop and ask how to proceed (install it, or
@@ -856,6 +859,7 @@ while a same-provider second opinion should stay in-session as a subagent.
 |------|----------|
 | [SECURITY.md](SECURITY.md) | **Grok data egress**: the historical whole-repo upload, xAI's 2026-07-15 open-sourcing + the source audit, the residual concerns (global-rule leak, unverifiable binary), and per-user hardening / migration for people who already ran Grok |
 | [references/cli-reference.md](references/cli-reference.md) | Full per-CLI flag tables, model ids, ZCode setup recipes, output-format shapes, session resume, sandbox/network detail, the Grok data-egress detail, troubleshooting |
+| [scripts/print-model-catalog.sh](scripts/print-model-catalog.sh) | Machine-local catalog snapshot (`codex debug models` / `agy models` / `grok models`). Not a published menu. |
 | [references/anthropic-terms.md](references/anthropic-terms.md) | Compliance detail: Anthropic subscription-routing block, Commercial Terms D.4, Fable 5 safeguards, enforcement history, plus the OpenAI / xAI / Z.ai / Google provider-terms matrix, with citations |
 | [references/reprompter-relay.md](references/reprompter-relay.md) | Pairing recipe: run a prompt-engineering skill (e.g. RePrompter) before relaying a nontrivial task; documents the RePrompter handoff contract |
 | [references/custom-targets.md](references/custom-targets.md) | User-connected targets: `~/.agents/relay-targets.json` registry for local models (Ollama, LM Studio, MLX) and other one-shot CLIs — field contract, preflight, security rules |
