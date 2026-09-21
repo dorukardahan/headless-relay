@@ -177,11 +177,11 @@ sessions = false
   if [ -n "$key" ]; then                                     # API key: no auth file read; env -i drops GROK_DISABLE_API_KEY_AUTH etc.
     ( cd "$iso" && exec env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin HOME="$hm" GROK_HOME="$gkh" TMPDIR="$tmp" TERM=dumb \
         GROK_TELEMETRY_ENABLED=false GROK_TELEMETRY_TRACE_UPLOAD=false GROK_EXTERNAL_OTEL=false GROK_WORKSPACE_DATA_COLLECTION_DISABLED=true XAI_API_KEY="$key" \
-        "$grokbin" -p "$1" -m grok-4.6 --disable-web-search --sandbox strict --deny '*' ) > "$base/out" 2>/dev/null &
+        "$grokbin" -p "$1" -m grok-4.7 --disable-web-search --sandbox strict --deny '*' ) > "$base/out" 2>/dev/null &
   else                                                       # subscription: only GROK_AUTH_PATH reaches grok (GROK_AUTH inline etc. dropped by env -i)
     ( cd "$iso" && exec env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin HOME="$hm" GROK_HOME="$gkh" TMPDIR="$tmp" TERM=dumb \
         GROK_TELEMETRY_ENABLED=false GROK_TELEMETRY_TRACE_UPLOAD=false GROK_EXTERNAL_OTEL=false GROK_WORKSPACE_DATA_COLLECTION_DISABLED=true GROK_AUTH_PATH="$ap" \
-        "$grokbin" -p "$1" -m grok-4.6 --disable-web-search --sandbox relayauth --deny '*' ) > "$base/out" 2>/dev/null &
+        "$grokbin" -p "$1" -m grok-4.7 --disable-web-search --sandbox relayauth --deny '*' ) > "$base/out" 2>/dev/null &
   fi
   child=$!
   __pg=$(ps -o pgid= -p "$child" 2>/dev/null | tr -d ' '); [ -n "$__pg" ] && [ "$__pg" = "$child" ] && pgok=1   # negative-kill ONLY if grok is VERIFIED to be its own process-group leader; false on dash (job control off) / zsh (set -m rejected) -> pgok stays 0
@@ -343,11 +343,11 @@ sessions = false
   if [ -n "$key" ]; then
     ( cd "$iso" && exec env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin HOME="$hm" GROK_HOME="$gkh" TMPDIR="$tmp" TERM=dumb \
         GROK_TELEMETRY_ENABLED=false GROK_TELEMETRY_TRACE_UPLOAD=false GROK_EXTERNAL_OTEL=false GROK_WORKSPACE_DATA_COLLECTION_DISABLED=true XAI_API_KEY="$key" \
-        "$grokbin" -p "$briefdata" -m grok-4.6 --disable-web-search --sandbox strict --tools "$mt" --disallowed-tools search_tool,use_tool ) >/dev/null 2>&1 &
+        "$grokbin" -p "$briefdata" -m grok-4.7 --disable-web-search --sandbox strict --tools "$mt" --disallowed-tools search_tool,use_tool ) >/dev/null 2>&1 &
   else
     ( cd "$iso" && exec env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin HOME="$hm" GROK_HOME="$gkh" TMPDIR="$tmp" TERM=dumb \
         GROK_TELEMETRY_ENABLED=false GROK_TELEMETRY_TRACE_UPLOAD=false GROK_EXTERNAL_OTEL=false GROK_WORKSPACE_DATA_COLLECTION_DISABLED=true GROK_AUTH_PATH="$ap" \
-        "$grokbin" -p "$briefdata" -m grok-4.6 --disable-web-search --sandbox relayauth --tools "$mt" --disallowed-tools search_tool,use_tool ) >/dev/null 2>&1 &
+        "$grokbin" -p "$briefdata" -m grok-4.7 --disable-web-search --sandbox relayauth --tools "$mt" --disallowed-tools search_tool,use_tool ) >/dev/null 2>&1 &
   fi
   child=$!
   __pg=$(ps -o pgid= -p "$child" 2>/dev/null | tr -d ' '); [ -n "$__pg" ] && [ "$__pg" = "$child" ] && pgok=1   # negative-kill ONLY if grok is VERIFIED to be its own process-group leader; false on dash (job control off) / zsh (set -m rejected) -> pgok stays 0, so no unverified process-group kill
@@ -881,7 +881,7 @@ while a same-provider second opinion should stay in-session as a subagent.
 | Grok says a tool was "blocked by policy" | Expected under `grok_relay`'s `--deny '*'` — a text relay needs no tools, the text answer still arrives. For media use `grok_media` (allow-lists only the 4 media tools via `--tools`, so image_gen still runs) |
 | Grok exits 1 instantly, stderr `Not signed in` though `grok login` is fine (subscription auth) | grok 1.0.x's seatbelt is kernel-enforced: plain `--sandbox strict` denies reading `GROK_AUTH_PATH` outside the sandbox | Already handled since v3.1.0: the helpers write `$GROK_HOME/sandbox.toml` (`relayauth` = strict + read_write on only the auth dir) and pass `--sandbox relayauth`. Seeing this means a pre-v3.1.0 helper on grok 1.0.x — update the skill |
 | Grok's answer references your `~/.claude` rules / `AGENTS.md` / a convention you didn't send | The isolation was skipped (raw `grok` call). `~/.claude` / `~/.cursor` rules load from `$HOME` (compat scan); `~/.grok/AGENTS.md` loads from `$GROK_HOME` (grok's own scan). Always call through `grok_relay` / `grok_media` — they run under an empty `HOME` AND a clean temp `GROK_HOME`, closing both |
-| Grok: `Couldn't set model 'grok-build': … "unknown model id"` | `grok-build` was retired from the CLI when grok-4.5 launched (July 2026) — use a current id, e.g. `-m grok-4.6` (the default since 2026-08-12; `grok models` lists what your login serves) |
+| Grok: `Couldn't set model 'grok-build': … "unknown model id"` | `grok-build` was retired from the CLI when grok-4.5 launched (July 2026) — use a current id, e.g. `-m grok-4.7` (`grok models` lists what your login serves) |
 | zcode: `Model config is missing. Create ~/.zcode/cli/config.json …` | One-time setup — follow the ZCode recipes in [references/cli-reference.md](references/cli-reference.md) |
 | `zcode login`: `OAuth response is not valid JSON` | Known open bug — skip login entirely; use the config-file or env-var recipe instead |
 | OpenCode `-f` file attach errors | Pipe via stdin instead (`cat file \| opencode run …`) |

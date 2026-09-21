@@ -135,7 +135,7 @@ sh scripts/print-model-catalog.sh
 
 That script reads catalogs only (`codex debug models`, `agy models`, `grok models`). It does
 not start a model turn. Do **not** run `codex models` — on the 0.144 series that starts an
-interactive session. Grok helper pins (`-m grok-4.6`) stay explicit on purpose.
+interactive session. Grok helper pins (`-m grok-4.7`) stay explicit on purpose.
 
 ## Compliance note
 
@@ -156,12 +156,13 @@ code (commit `c68e39f`) found the whole-repo bundle path gone, see [SECURITY.md]
 the Gemini lane was verified 2026-07-08 on Antigravity agy 1.1.0. A 2026-08-14 refresh: on grok 1.0.3 the
 helper flags were confirmed present and one live subscription `grok_relay` call was smoke-verified
 (`grok_media`, the API-key branch, and refresh persistence were not live-exercised) — grok-4.6 became
-the CLI default 2026-08-12 and the helpers now pin `-m grok-4.6`; the GLM lane re-verified on
+the CLI default 2026-08-12; helpers now pin `-m grok-4.7` (Grok 4.7, 2026-09-21); the GLM lane re-verified on
 GLM-5.3 (`zai-coding-plan/glm-5.3`, launched that day, smoke-verified via opencode); and the Claude lane verified headless with Opus 5
 (`claude -p --model claude-opus-5`). v3.1.1 then bounded the seatbelt grant to the credential's own
 directory, after seven review rounds (Codex, GPT 5.6 Sol, GLM 5.3) whose findings were each reproduced
 locally before being fixed. A 2026-09-21 docs refresh pins current example models:
 `gpt-6-astra` (Codex CLI id; fall back to `gpt-5.6-sol` if `codex debug models` does not list it — do not run `codex models`, that starts a session),
 `zai-coding-plan/glm-5.3` / `zai/glm-5.3` (ZCode recipes no longer default to GLM-5.2),
+`grok-4.7` (Grok helper `-m` pin; launched 2026-09-21),
 and `Gemini 3.8 Flash (High)` (live `agy models` on agy 1.1.1). CLIs drift fast, so re-verify
 flags when something errors.
