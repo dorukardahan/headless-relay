@@ -24,6 +24,23 @@ else
     echo "FAIL: print-model-catalog.sh no longer warns against \`codex models\`"
     fail=1
   }
+  grep -qF 'data.get("models")' "$ROOT/scripts/print-model-catalog.sh" || {
+    echo "FAIL: print-model-catalog.sh no longer reads the Codex models-list schema"
+    fail=1
+  }
+  # Grok catalog must stay isolated + bounded (availability ladder step 2).
+  grep -qF 'env -i' "$ROOT/scripts/print-model-catalog.sh" || {
+    echo "FAIL: print-model-catalog.sh Grok catalog lost hermetic env -i"
+    fail=1
+  }
+  grep -qF "perl -e 'alarm shift; exec @ARGV' 40" "$ROOT/scripts/print-model-catalog.sh" || {
+    echo "FAIL: print-model-catalog.sh Grok catalog lost the 40s alarm timeout"
+    fail=1
+  }
+  grep -qF 'GROK_AUTH_PATH' "$ROOT/scripts/print-model-catalog.sh" || {
+    echo "FAIL: print-model-catalog.sh Grok catalog lost GROK_AUTH_PATH"
+    fail=1
+  }
 fi
 
 grep -qF 'scripts/print-model-catalog.sh' "$ROOT/README.md" || {

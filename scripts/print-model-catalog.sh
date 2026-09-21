@@ -50,19 +50,20 @@ try:
 except json.JSONDecodeError:
     print("skip: catalog was not JSON")
     sys.exit(0)
+# Schema (codex-cli 0.144): {"models": [{"slug": "gpt-5.6-sol", "priority": ..., ...}, ...]}
+# Take each model-entry slug (or id). Do not walk nested fields — that picks up
+# metadata values and drops short slugs such as o3.
+models = data.get("models") if isinstance(data, dict) else None
+if not isinstance(models, list):
+    print("skip: catalog has no models list")
+    sys.exit(0)
 ids = []
-SKIP = {"priority", "default", "bundled", "current", "latest"}
-def walk(o):
-    if isinstance(o, dict):
-        for k, v in o.items():
-            if k in ("id", "slug") and isinstance(v, str) and v and v not in ids:
-                if v not in SKIP and ("-" in v or v.startswith("gpt") or v.startswith("codex")):
-                    ids.append(v)
-            walk(v)
-    elif isinstance(o, list):
-        for i in o:
-            walk(i)
-walk(data)
+for m in models:
+    if not isinstance(m, dict):
+        continue
+    slug = m.get("slug") or m.get("id")
+    if isinstance(slug, str) and slug.strip() and slug not in ids:
+        ids.append(slug)
 if not ids:
     print("skip: no model ids in catalog")
     sys.exit(0)
@@ -100,18 +101,36 @@ fi
 echo
 
 # --- Grok ---
+# Catalog only. Same hermetic shape as the availability ladder in
+# references/cli-reference.md step 2: env -i allowlist, empty HOME, clean temp
+# GROK_HOME, auth via GROK_AUTH_PATH, 40s alarm. Not a model turn (no -p).
 echo "## Grok (\`grok models\`)"
 if have grok; then
   echo "binary: $(command -v grok)"
-  if _out=$(grok models 2>/dev/null); then
+  _gh=$(mktemp -d "${TMPDIR:-/tmp}/grok-home.XXXXXX") || _gh=
+  _iso=$(mktemp -d "${TMPDIR:-/tmp}/grok-iso.XXXXXX") || _iso=
+  _ap="${GROK_AUTH_PATH:-${GROK_HOME:-$HOME/.grok}/auth.json}"
+  _grokbin=$(command -v grok)
+  if [ -z "$_gh" ] || [ -z "$_iso" ]; then
+    echo "skip: mktemp failed"
+  elif [ ! -f "$_ap" ] || [ ! -r "$_ap" ]; then
+    echo "skip: no readable auth file (set GROK_AUTH_PATH or run grok login)"
+  else
+    _out=$(
+      cd "$_iso" && env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin \
+        HOME="$_gh" GROK_HOME="$_gh" TMPDIR="$_gh" TERM=dumb \
+        GROK_TELEMETRY_ENABLED=false GROK_TELEMETRY_TRACE_UPLOAD=false \
+        GROK_EXTERNAL_OTEL=false GROK_AUTH_PATH="$_ap" \
+        perl -e 'alarm shift; exec @ARGV' 40 "$_grokbin" models 2>/dev/null
+    ) || _out=
     if [ -n "$_out" ]; then
       printf '%s\n' "$_out"
     else
-      echo "skip: empty catalog"
+      echo "skip: isolated \`grok models\` failed or timed out"
     fi
-  else
-    echo "skip: \`grok models\` failed"
   fi
+  [ -n "${_gh:-}" ] && rm -rf "$_gh"
+  [ -n "${_iso:-}" ] && rm -rf "$_iso"
 else
   echo "skip: \`grok\` not on PATH"
 fi
