@@ -69,6 +69,14 @@ else
     echo "FAIL: print-model-catalog.sh no longer requires Grok model-list markers"
     fail=1
   }
+  grep -qF "trap '_cleanup_grok_tmp' EXIT INT TERM HUP" "$ROOT/scripts/print-model-catalog.sh" || {
+    echo "FAIL: print-model-catalog.sh no longer traps signals around Grok temp dirs"
+    fail=1
+  }
+  grep -qF 'run_to 5 codex --version' "$ROOT/scripts/print-model-catalog.sh" || {
+    echo "FAIL: print-model-catalog.sh Codex --version probe is unbounded"
+    fail=1
+  }
 fi
 
 if [ ! -s "$ROOT/scripts/catalog_watchdog.py" ]; then

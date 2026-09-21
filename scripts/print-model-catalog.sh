@@ -80,7 +80,8 @@ accept_grok_catalog() {
 echo "## Codex (\`codex debug models\`)"
 if have codex; then
   echo "binary: $(command -v codex)"
-  echo "version: $(codex --version 2>/dev/null | head -n 1 || echo unknown)"
+  _ver=$(run_to 5 codex --version) || _ver=
+  echo "version: $(printf '%s\n' "$_ver" | head -n 1 || echo unknown)"
   _raw=$(run_to 20 codex debug models) || _raw=
   if [ -z "$_raw" ]; then
     echo "skip: catalog command failed or timed out"
@@ -145,6 +146,13 @@ echo
 echo "## Grok (\`grok models\`)"
 if have grok; then
   echo "binary: $(command -v grok)"
+  _gh=
+  _iso=
+  _cleanup_grok_tmp() {
+    [ -n "${_gh:-}" ] && rm -rf "$_gh"
+    [ -n "${_iso:-}" ] && rm -rf "$_iso"
+  }
+  trap '_cleanup_grok_tmp' EXIT INT TERM HUP
   _gh=$(mktemp -d "${TMPDIR:-/tmp}/grok-home.XXXXXX") || _gh=
   _iso=$(mktemp -d "${TMPDIR:-/tmp}/grok-iso.XXXXXX") || _iso=
   _grokbin=$(command -v grok)
@@ -206,8 +214,8 @@ if have grok; then
       echo "skip: no readable auth file at the resolved path (set GROK_AUTH_PATH or run grok login)"
     fi
   fi
-  [ -n "${_gh:-}" ] && rm -rf "$_gh"
-  [ -n "${_iso:-}" ] && rm -rf "$_iso"
+  _cleanup_grok_tmp
+  trap - EXIT INT TERM HUP
 else
   echo "skip: \`grok\` not on PATH"
 fi
