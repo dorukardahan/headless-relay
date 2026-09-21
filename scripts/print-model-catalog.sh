@@ -38,19 +38,122 @@ if ! have python3; then
 fi
 
 # Bound a catalog CLI: print stdout on success, else empty. Never hangs the script.
+# Starts the command in its own process group and reaps the group on timeout
+# (agy/grok workers that fork would otherwise outlive subprocess.run's child).
 # Usage: _out=$(run_to SECS CMD [args...]) || _out=
+# Never pass secrets as CMD args — they land in the watchdog argv.
 run_to() {
   python3 - "$@" <<'PY'
-import subprocess, sys
+import os, signal, subprocess, sys
 secs = int(sys.argv[1])
 cmd = sys.argv[2:]
 try:
-    p = subprocess.run(cmd, capture_output=True, text=True, timeout=secs)
-except subprocess.TimeoutExpired:
-    sys.exit(124)
+    p = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+        start_new_session=True,
+    )
 except Exception:
     sys.exit(1)
-sys.stdout.write(p.stdout or "")
+
+def _reap_group(proc):
+    try:
+        os.killpg(proc.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+    try:
+        proc.wait(timeout=2)
+        return
+    except subprocess.TimeoutExpired:
+        pass
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    try:
+        proc.wait(timeout=2)
+    except subprocess.TimeoutExpired:
+        pass
+
+try:
+    out, _err = p.communicate(timeout=secs)
+except subprocess.TimeoutExpired:
+    _reap_group(p)
+    sys.exit(124)
+except Exception:
+    _reap_group(p)
+    sys.exit(1)
+sys.stdout.write(out or "")
+sys.exit(0 if p.returncode == 0 else (p.returncode or 1))
+PY
+}
+
+# Isolated Grok catalog. Seconds, grokbin, iso dir, synthetic home, optional auth path.
+# API key is inherited from this shell's environment — never placed in argv.
+run_grok_catalog() {
+  python3 - "$1" "$2" "$3" "$4" "${5:-}" <<'PY'
+import os, signal, subprocess, sys
+secs, grokbin, iso, home, auth_path = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5]
+env = {
+    "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+    "HOME": home,
+    "GROK_HOME": home,
+    "TMPDIR": home,
+    "TERM": "dumb",
+    "GROK_TELEMETRY_ENABLED": "false",
+    "GROK_TELEMETRY_TRACE_UPLOAD": "false",
+    "GROK_EXTERNAL_OTEL": "false",
+}
+if auth_path:
+    env["GROK_AUTH_PATH"] = auth_path
+else:
+    key = os.environ.get("XAI_API_KEY") or os.environ.get("GROK_CODE_XAI_API_KEY") or ""
+    if not key:
+        sys.exit(1)
+    env["XAI_API_KEY"] = key
+try:
+    p = subprocess.Popen(
+        [grokbin, "models"],
+        cwd=iso,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+        start_new_session=True,
+    )
+except Exception:
+    sys.exit(1)
+
+def _reap_group(proc):
+    try:
+        os.killpg(proc.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+    try:
+        proc.wait(timeout=2)
+        return
+    except subprocess.TimeoutExpired:
+        pass
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    try:
+        proc.wait(timeout=2)
+    except subprocess.TimeoutExpired:
+        pass
+
+try:
+    out, _err = p.communicate(timeout=int(secs))
+except subprocess.TimeoutExpired:
+    _reap_group(p)
+    sys.exit(124)
+except Exception:
+    _reap_group(p)
+    sys.exit(1)
+sys.stdout.write(out or "")
 sys.exit(0 if p.returncode == 0 else (p.returncode or 1))
 PY
 }
@@ -137,17 +240,24 @@ if have grok; then
   _gh=$(mktemp -d "${TMPDIR:-/tmp}/grok-home.XXXXXX") || _gh=
   _iso=$(mktemp -d "${TMPDIR:-/tmp}/grok-iso.XXXXXX") || _iso=
   _grokbin=$(command -v grok)
+  case "$_grokbin" in
+    "") ;;
+    /*) ;;
+    *)
+      if [ "$(pwd)" -ef . ]; then
+        _grokbin="$(pwd)/$_grokbin"
+      else
+        echo "skip: grok binary path is relative and the working directory name is unsafe"
+        _grokbin=
+      fi
+      ;;
+  esac
   _key="${XAI_API_KEY:-${GROK_CODE_XAI_API_KEY:-}}"
-  if [ -z "$_gh" ] || [ -z "$_iso" ]; then
-    echo "skip: mktemp failed"
+  if [ -z "$_gh" ] || [ -z "$_iso" ] || [ -z "$_grokbin" ]; then
+    [ -z "$_grokbin" ] || echo "skip: mktemp failed"
   elif [ -n "$_key" ]; then
-    _out=$(
-      cd "$_iso" && run_to 40 env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin \
-        HOME="$_gh" GROK_HOME="$_gh" TMPDIR="$_gh" TERM=dumb \
-        GROK_TELEMETRY_ENABLED=false GROK_TELEMETRY_TRACE_UPLOAD=false \
-        GROK_EXTERNAL_OTEL=false XAI_API_KEY="$_key" \
-        "$_grokbin" models
-    ) || _out=
+    # Key stays in this shell env; run_grok_catalog inherits it. Never argv.
+    _out=$(run_grok_catalog 40 "$_grokbin" "$_iso" "$_gh") || _out=
     if [ -n "$_out" ]; then
       printf '%s\n' "$_out"
     else
@@ -178,13 +288,7 @@ if have grok; then
         ;;
     esac
     if [ -n "$_ap" ] && [ -f "$_ap" ] && [ -r "$_ap" ]; then
-      _out=$(
-        cd "$_iso" && run_to 40 env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin \
-          HOME="$_gh" GROK_HOME="$_gh" TMPDIR="$_gh" TERM=dumb \
-          GROK_TELEMETRY_ENABLED=false GROK_TELEMETRY_TRACE_UPLOAD=false \
-          GROK_EXTERNAL_OTEL=false GROK_AUTH_PATH="$_ap" \
-          "$_grokbin" models
-      ) || _out=
+      _out=$(run_grok_catalog 40 "$_grokbin" "$_iso" "$_gh" "$_ap") || _out=
       if [ -n "$_out" ]; then
         printf '%s\n' "$_out"
       else

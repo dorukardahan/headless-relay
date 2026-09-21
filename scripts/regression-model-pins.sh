@@ -37,14 +37,22 @@ else
     echo "FAIL: print-model-catalog.sh Gemini catalog lost the 20s watchdog"
     fail=1
   }
-  grep -qF 'run_to 40 env -i' "$ROOT/scripts/print-model-catalog.sh" || {
-    echo "FAIL: print-model-catalog.sh Grok catalog lost the isolated 40s watchdog"
+  grep -qF 'start_new_session=True' "$ROOT/scripts/print-model-catalog.sh" || {
+    echo "FAIL: print-model-catalog.sh watchdog no longer starts a new process group"
     fail=1
   }
-  if grep -qF 'perl -e' "$ROOT/scripts/print-model-catalog.sh"; then
-    echo "FAIL: print-model-catalog.sh still depends on Perl for the watchdog"
+  grep -qF 'run_grok_catalog' "$ROOT/scripts/print-model-catalog.sh" || {
+    echo "FAIL: print-model-catalog.sh lost the isolated Grok catalog helper"
+    fail=1
+  }
+  if grep -qE 'XAI_API_KEY="\$' "$ROOT/scripts/print-model-catalog.sh"; then
+    echo "FAIL: print-model-catalog.sh still interpolates XAI_API_KEY onto a command line"
     fail=1
   fi
+  grep -qF 'os.environ.get("XAI_API_KEY")' "$ROOT/scripts/print-model-catalog.sh" || {
+    echo "FAIL: print-model-catalog.sh no longer reads the API key from the environment"
+    fail=1
+  }
   grep -qF 'GROK_AUTH_PATH' "$ROOT/scripts/print-model-catalog.sh" || {
     echo "FAIL: print-model-catalog.sh Grok catalog lost GROK_AUTH_PATH"
     fail=1
