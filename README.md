@@ -145,7 +145,7 @@ GLM-5.3 (`zai-coding-plan/glm-5.3`, launched that day, smoke-verified via openco
 (`claude -p --model claude-opus-5`). v3.1.1 then bounded the seatbelt grant to the credential's own
 directory, after seven review rounds (Codex, GPT 5.6 Sol, GLM 5.3) whose findings were each reproduced
 locally before being fixed. A 2026-09-21 docs refresh pins current example models:
-`gpt-6-astra` (Codex CLI id; fall back to `gpt-5.6-sol` if `codex models` does not list it),
+`gpt-6-astra` (Codex CLI id; fall back to `gpt-5.6-sol` if `codex debug models` does not list it — do not run `codex models`, that starts a session),
 `zai-coding-plan/glm-5.3` / `zai/glm-5.3` (ZCode recipes no longer default to GLM-5.2),
 and `Gemini 3.8 Flash (High)` (live `agy models` on agy 1.1.1). CLIs drift fast, so re-verify
 flags when something errors.
