@@ -506,7 +506,7 @@ substitute a different model to fill the gap.
 
 | Model | Binary check | Auth / plan check |
 |-------|--------------|-------------------|
-| GPT (Codex) | `command -v codex` | fails fast with an auth error when logged out (`codex login`) |
+| GPT (Codex) | `command -v codex` | fails fast with an auth error when logged out (`codex login`). Pin the model from `codex debug models` (JSON catalog, not a session): use `gpt-6-astra` only if that id is listed, otherwise `-c model="gpt-5.6-sol"`. Do not run `codex models` — on 0.144 that starts an interactive prompt. |
 | GLM via OpenCode | `command -v opencode` | `opencode auth list` shows a Z.AI credential |
 | GLM via ZCode | `command -v zcode` (add a PATH wrapper if only the app is installed) | `~/.zcode/cli/config.json` exists or `ZCODE_API_KEY` is set. `zcode login` is currently broken — see [references/cli-reference.md](references/cli-reference.md) |
 | Grok | `command -v grok` | Run `grok models` (a catalog fetch — no repo bundle, no model turn). Grok is available if the output lists models (`Default model:` / `Available models:`), EVEN IF a "You are not authenticated." line appears above the list — that header just mirrors an expired cached token that the same call silently refreshes before fetching the catalog. Only "not authenticated" with NO model list is a real problem: auth.json missing → logged out; auth.json present → confirm with one bounded real call via `grok_relay`. Walk the availability ladder in [references/cli-reference.md](references/cli-reference.md) |
@@ -606,7 +606,7 @@ zcode --prompt "your question here"
 grok_relay "your question here"
 
 # Gemini via Antigravity — model name is the display string from `agy models`
-agy -p "your question here" --model "Gemini 3.1 Pro (High)"
+agy -p "your question here" --model "Gemini 3.8 Flash (High)"
 
 # Claude (headless subprocess)
 claude -p "your question here" --model fable
@@ -677,7 +677,7 @@ cat /tmp/handoff.md | opencode run -m "zai-coding-plan/glm-5.3" --variant max > 
 grok_relay "$(cat /tmp/handoff.md)" > /tmp/ans-grok.md 2>/dev/null &
 wait
 # Gemini runs SEQUENTIALLY, AFTER the burst — agy 1.1.0 wedges inside a 3+ CLI burst (see below):
-agy -p "$(cat /tmp/handoff.md)" --model "Gemini 3.1 Pro (High)" > /tmp/ans-gemini.md 2>/dev/null
+agy -p "$(cat /tmp/handoff.md)" --model "Gemini 3.8 Flash (High)" > /tmp/ans-gemini.md 2>/dev/null
 ```
 
 On a machine with ZCode instead of OpenCode, swap the GLM lane:
@@ -779,6 +779,8 @@ directory:
 #      instead of calling the tool. `max` and below work fine (max ran in ~55s).
 #   2. Redirect stdin from /dev/null — a positional-arg prompt can otherwise block on
 #      "Reading additional input from stdin". macOS has no `timeout`; use perl's alarm.
+# Pin `gpt-5.6-sol` here: it is the broadly enrolled high-capability model. Switch the
+# `-c model=` value to `gpt-6-astra` only after `codex debug models` lists that id.
 cd /path/to/output-dir
 perl -e 'alarm shift; exec @ARGV' 480 \
   codex exec --sandbox workspace-write -c model="gpt-5.6-sol" \
@@ -787,7 +789,7 @@ perl -e 'alarm shift; exec @ARGV' 480 \
 # Gemini (agy): native generate_image tool, works headless. Run it SOLO (the agy parallel-burst
 # hang applies to media too); the Google-account login covers it — no API key, no OpenRouter.
 cd /path/to/output-dir
-agy -p "$(cat /tmp/img-brief.md)" --model "Gemini 3.1 Pro (High)" --add-dir "$PWD" </dev/null
+agy -p "$(cat /tmp/img-brief.md)" --model "Gemini 3.8 Flash (High)" --add-dir "$PWD" </dev/null
 ```
 
 Grok media (image or video) goes through the `grok_media` helper (define it once, see the Grok

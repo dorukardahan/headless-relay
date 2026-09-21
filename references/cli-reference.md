@@ -3,12 +3,13 @@
 Full per-CLI detail for `headless-relay`. Flags verified 2026-07-02 against installed
 binaries: opencode 1.14.31, claude (Claude Code) 2.1.198, zcode CLI 0.15.0 (ZCode desktop app
 3.2.2, recipes re-verified on app 3.3.3); GPT section re-verified 2026-07-10 on codex-cli
-0.144.0 (GPT-5.6 launch); Grok section re-verified 2026-07-08 on grok 0.2.91 (grok-4.5 launch),
+0.144.0 (GPT-5.6 launch) and refreshed 2026-09-21 for `gpt-6-astra` (Codex CLI id; account
+access still gated — if `codex debug models` does not list it, fall back to `gpt-5.6-sol`); Grok section re-verified 2026-07-08 on grok 0.2.91 (grok-4.5 launch),
 then re-assessed 2026-07-15 after xAI open-sourced Grok Build (source audit of commit
 `c68e39f`) — the whole-repo bundle is gone from source; the residuals are the two-root
 global-rule leak (Claude/Cursor compat from `$HOME` + grok's own `~/.grok/AGENTS.md`) and the
 unverifiable shipped binary, then re-verified 2026-08-14 on grok 1.0.3 (grok-4.6 became the CLI default 2026-08-12; all helper flags intact, live relay smoke green); Antigravity section verified
-2026-07-08 on agy 1.1.0. Flags drift — re-check `--help` when a command errors with
+2026-07-08 on agy 1.1.0 and refreshed 2026-09-21 on agy 1.1.1 (`agy models` listed Gemini 3.8 Flash as the current top Gemini Flash tier). Flags drift — re-check `--help` when a command errors with
 `unexpected argument`.
 
 ## Contents
@@ -29,7 +30,7 @@ no argument is given (or the argument is `-`). If both are supplied, stdin is ap
 
 | Flag | Meaning |
 |------|---------|
-| `-m, --model <MODEL>` | Model id, e.g. `gpt-5.6-sol`. Omit to use the `~/.codex/config.toml` default. |
+| `-m, --model <MODEL>` | Model id, e.g. `gpt-6-astra` (or `gpt-5.6-sol` if Astra is not on the account). Check with `codex debug models`, not `codex models`. Omit to use the `~/.codex/config.toml` default. |
 | `-c, --config <key=value>` | Override a config value (TOML). E.g. `-c model_reasoning_effort="ultra"`. |
 | `-s, --sandbox <MODE>` | `read-only` (default), `workspace-write`, `danger-full-access`. |
 | `--dangerously-bypass-approvals-and-sandbox` | No sandbox. EXTREMELY DANGEROUS; isolated containers only. |
@@ -71,13 +72,21 @@ codex exec --sandbox workspace-write \
   -c 'sandbox_workspace_write.network_access=true' "<task>"
 ```
 
-Models (GPT-5.6 launch, 2026-07-09): `gpt-5.6-sol` (frontier agentic coding), `gpt-5.6-terra`
-(balanced), `gpt-5.6-luna` (fast/affordable); `gpt-5.5` and `gpt-5.4` moved to legacy.
-Reasoning effort ladder is now `low | medium | high | xhigh | max | ultra` — `ultra` is
+Models (GPT-6 Astra, 2026-09-03; Codex CLI id `gpt-6-astra`): `gpt-6-astra` is the current
+frontier coding/research/computer-use model. The GPT-5.6 family remains available:
+`gpt-5.6-sol` (high-capability, broader access), `gpt-5.6-terra` (balanced), `gpt-5.6-luna`
+(fast/affordable); `gpt-5.5` and `gpt-5.4` moved to legacy. Check enrollment with
+`codex debug models` (JSON catalog; `--bundled` skips refresh). Do **not** run
+`codex models`: on the 0.144 series that is not a catalog subcommand, so it starts an
+interactive session with the leftover words as the prompt. If the catalog JSON does not
+contain `gpt-6-astra`, the account is not enrolled yet — use `gpt-5.6-sol`.
+Reasoning effort ladder is `low | medium | high | xhigh | max | ultra` — `ultra` is
 "maximum reasoning with automatic task delegation" (codex may fan out its own subagents).
-Two load-bearing notes, live-verified on 0.144.0: the 5.6 models DEFAULT TO `low` effort, so
-always pass `-c model="gpt-5.6-sol" -c model_reasoning_effort="ultra"` (or your chosen tier)
-explicitly for review-grade output; and the 0.142.x exec flag semantics are unchanged
+Astra's documented API effort set is `low | medium | high | xhigh | max` (no `ultra`).
+Two load-bearing notes, originally live-verified on 0.144.0 for the 5.6 family: those models
+DEFAULT TO `low` effort, so always pass `-c model="gpt-6-astra"` (or `gpt-5.6-sol`) plus
+`-c model_reasoning_effort="high"` / `"xhigh"` / `"max"` (or `"ultra"` on 5.6) explicitly for
+review-grade output; and the 0.142.x exec flag semantics are unchanged
 (`--ask-for-approval` still rejected, network still requires the `-c` override above).
 
 Piping example (feed a `gh` log in, post the summary out):
@@ -148,13 +157,12 @@ live-verified end-to-end on CLI 0.15.0.
 
 **Recipe A — persistent config file (recommended).** Write `~/.zcode/cli/config.json` in
 exactly the shape the (broken) login flow would have written, then `chmod 600` it
-(model note, 2026-08-14: the ZCode app still pins `zai/glm-5.2` in its own config and the
-recipes below mirror that; GLM-5.3 is live via OpenCode — bump `model.main` to `zai/glm-5.3`
-once the app exposes it):
+(model note, 2026-09-21: pin the recipes at `zai/glm-5.3`. GLM-5.2 is the previous
+generation — bump `model.main` if an older app config still has it):
 
 ```json
 {
-  "model": { "main": "zai/glm-5.2", "lite": "zai/glm-4.7" },
+  "model": { "main": "zai/glm-5.3", "lite": "zai/glm-5.3" },
   "provider": {
     "zai": {
       "kind": "anthropic",
@@ -165,8 +173,7 @@ once the app exposes it):
         "baseURL": "https://api.z.ai/api/anthropic"
       },
       "models": {
-        "glm-5.2": { "name": "GLM-5.2" },
-        "glm-4.7": { "name": "GLM-4.7" }
+        "glm-5.3": { "name": "GLM-5.3" }
       }
     }
   }
@@ -182,7 +189,7 @@ wire format.
 
 ```bash
 ZCODE_API_KEY="YOUR_ZAI_API_KEY" \
-ZCODE_MODEL="zai/glm-5.2" \
+ZCODE_MODEL="zai/glm-5.3" \
 ZCODE_BASE_URL="https://api.z.ai/api/anthropic" \
 zcode --prompt "your question here"
 ```
@@ -198,10 +205,10 @@ the key):
 
 ```bash
 jq -n --arg key "$(jq -r '.provider["builtin:zai"].options.apiKey' ~/.zcode/v2/config.json)" '{
-  model: {main: "zai/glm-5.2", lite: "zai/glm-4.7"},
+  model: {main: "zai/glm-5.3", lite: "zai/glm-5.3"},
   provider: {zai: {kind: "anthropic", name: "Z.AI Coding Plan",
     options: {apiKey: $key, apiKeyRequired: true, baseURL: "https://api.z.ai/api/anthropic"},
-    models: {"glm-5.2": {name: "GLM-5.2"}, "glm-4.7": {name: "GLM-4.7"}}}}}' \
+    models: {"glm-5.3": {name: "GLM-5.3"}}}}}' \
   > ~/.zcode/cli/config.json && chmod 600 ~/.zcode/cli/config.json
 ```
 
@@ -570,7 +577,7 @@ login. All behavior below live-verified 2026-07-08 on agy 1.1.0.
 |------|---------|
 | `-p, --print <PROMPT>` | Run a single prompt non-interactively, print the response, exit. `--prompt` is an alias. |
 | `--print-timeout <dur>` | Print-mode wait cap, default `5m0s`. |
-| `--model <name>` | Display-string model name from `agy models`, e.g. `"Gemini 3.1 Pro (High)"`. Omit to use the user's configured default. |
+| `--model <name>` | Display-string model name from `agy models`, e.g. `"Gemini 3.8 Flash (High)"`. Omit to use the user's configured default. |
 | `--add-dir <path>` | Add a directory to the workspace (repeatable) — it also BECOMES the working directory. Without it agy works in its own scratch dir, `~/.gemini/antigravity-cli/scratch`. |
 | `--mode <mode>` | `accept-edits`, `plan`. Use `plan` for advice-only runs. |
 | `--sandbox` | Enable terminal restrictions. |
@@ -578,10 +585,12 @@ login. All behavior below live-verified 2026-07-08 on agy 1.1.0.
 | `-c, --continue` / `--conversation <id>` | Resume the most recent conversation / a specific one. |
 | `-i, --prompt-interactive` | Run a prompt then stay interactive — NOT headless; avoid in scripts. |
 
-Model menu (`agy models`, 2026-07-08): Gemini 3.5 Flash (Low/Medium/High), Gemini 3.1 Pro
-(Low/High), Claude Sonnet 4.6 (Thinking), Claude Opus 4.6 (Thinking), GPT-OSS 120B (Medium) —
+Model menu (`agy models`, 2026-09-21 on agy 1.1.1): Gemini 3.8 Flash (Low/Medium/High),
+Gemini 3.7 Flash, Gemini 3.6 Flash, Gemini 3.1 Pro (Low/High), Claude Sonnet 4.6 (Thinking),
+Claude Opus 4.6 (Thinking), GPT-OSS 120B (Medium) —
 the non-Google models are served through Google's platform. The reasoning tier is baked into
-the model name; `"Gemini 3.1 Pro (High)"` is the top Gemini tier.
+the model name; `"Gemini 3.8 Flash (High)"` is the current top Gemini Flash tier on this
+CLI (Pro remains available as `"Gemini 3.1 Pro (High)"`).
 
 Notes, all live-verified:
 - **The old Gemini CLI's per-user API concurrency cap is gone**: three parallel `agy -p` runs
@@ -660,6 +669,8 @@ default mode needs no `OPENAI_API_KEY`; a CLI fallback `scripts/image_gen.py` us
 `gpt-image-2`). It works headless via `codex exec` — verified 2026-07-10 on codex-cli 0.144.0,
 which generated a blue-circle PNG into the target dir. Output also mirrors to
 `~/.codex/generated_images/<session>/exec-<uuid>.png`.
+The copy-paste pin below is `gpt-5.6-sol` so an unenrolled Astra account still runs.
+Switch to `gpt-6-astra` only after `codex debug models` lists that id.
 
 ```bash
 cd /path/to/output-dir
@@ -696,7 +707,7 @@ alternative). No native VIDEO tool (agy self-reports video is unsupported).
 cd /path/to/output-dir
 agy -p "Call your generate_image tool immediately — do not research, spawn subagents, or use a
    skill. Generate a <description>. Save it to the current directory. Print exactly:
-   SAVED: <absolute path>." --model "Gemini 3.1 Pro (High)" --add-dir "$PWD" </dev/null
+   SAVED: <absolute path>." --model "Gemini 3.8 Flash (High)" --add-dir "$PWD" </dev/null
 ```
 
 Caveat: run the image lane **solo / sequentially** — the agy parallel-burst hang
@@ -719,7 +730,7 @@ exits. Any CLI option works with `-p`.
 
 | Flag | Meaning |
 |------|---------|
-| `--model <model>` | Alias (`fable`, `opus`, `sonnet`) or full name (`claude-fable-5`). |
+| `--model <model>` | Alias (`fable`, `opus`, `sonnet`) or full name (`claude-fable-5-1`). |
 | `--output-format <fmt>` | `text` (default), `json` (single result), `stream-json` (NDJSON). |
 | `--input-format <fmt>` | `text` (default), `stream-json`. |
 | `--effort <level>` | `low\|medium\|high\|xhigh\|max`. |
@@ -797,7 +808,7 @@ structured output for the precise reason. When capturing a piped tool's exit thr
 | Codex behaves differently on another machine (writes/network that "shouldn't" work) | exec loads `~/.codex/config.toml`; `on-request` + auto-reviewer configs can escalate failed commands out of the sandbox | Pass explicit `--sandbox`/`-c` flags, or `--ignore-user-config` for reproducible runs |
 | Codex "network access restricted", `gh`/`curl` fail | `workspace-write` blocks network by default | Add `-c 'sandbox_workspace_write.network_access=true'` |
 | Codex stops with a clarifying question instead of reviewing | Default read-only sandbox blocked a command it needed | Escalate sandbox only as far as needed; or pre-fetch data into the prompt file |
-| Codex answer seems shallow on a 5.6 model | GPT-5.6 models default to LOW reasoning effort | Pass `-c model_reasoning_effort="high"` / `"ultra"` explicitly (or pin it in config.toml) |
+| Codex answer seems shallow on a 5.6 / 6 model | GPT-5.6 models default to LOW reasoning effort; Astra may still need an explicit effort pin | Pass `-c model="gpt-6-astra"` (or `gpt-5.6-sol`) and `-c model_reasoning_effort="high"` / `"xhigh"` / `"max"` (or `"ultra"` on 5.6) explicitly (or pin it in config.toml) |
 | Prompt with backticks / `$` / newlines mangled or executed | Shell interpreted the inline `"…"` | Write to a file; feed via stdin, `--prompt-file`, or a quoted `"$(cat file)"` |
 | You ran an old, pre-2026-07-15 Grok Build in a real repo | Older versions bundled + uploaded the whole tracked repo + git history to xAI GCS (see the data-egress section above; the path is gone from source in the open-sourced release) | Follow [../SECURITY.md](../SECURITY.md) to check logs and rotate any exposed secrets |
 | "Is Grok read-only / local / safe?" | No — it's a cloud model like the others. The whole-repo upload is gone per the 2026-07-15 source audit; the global-rule leak and the unverifiable binary remain | Never present Grok as local; run it through `grok_relay`'s hermetic env-i + empty-HOME + clean-temp-GROK_HOME shape either way |
@@ -809,7 +820,7 @@ structured output for the precise reason. When capturing a piped tool's exit thr
 | Grok answer seems shallow | A lighter model (e.g. `grok-composer-2.5-fast`) was selected | Pass `-m grok-4.6` explicitly |
 | OpenCode `-f` file attach errors | Known `-f` issue on some versions | Pipe the prompt on stdin instead |
 | zcode: `Model config is missing. Create ~/.zcode/cli/config.json …` | No CLI config and no env vars | Apply Recipe A, B, or C above |
-| zcode config written but `model: Invalid input` in `~/.zcode/cli/log/` | `model.main` written as an object or bad ref | `model.main` must be a `provider/model` STRING, e.g. `"zai/glm-5.2"` |
+| zcode config written but `model: Invalid input` in `~/.zcode/cli/log/` | `model.main` written as an object or bad ref | `model.main` must be a `provider/model` STRING, e.g. `"zai/glm-5.3"` |
 | `zcode login`: `OAuth response is not valid JSON` | Open Z.ai bug (feedback #51, #20) | Skip login; use Recipe A/B/C |
 | GLM cites a CI yml / vercel.json / env change absent from the diff | GLM tends to hallucinate infrastructure claims | Verify against the real file before acting |
 | GLM confuses similar functions across files | Known limitation | Cross-check its findings against actual file paths |
