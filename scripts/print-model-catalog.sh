@@ -117,7 +117,6 @@ if have grok; then
   _iso=$(mktemp -d "${TMPDIR:-/tmp}/grok-iso.XXXXXX") || _iso=
   _grokbin=$(command -v grok)
   _key="${XAI_API_KEY:-${GROK_CODE_XAI_API_KEY:-}}"
-  _ap="${GROK_AUTH_PATH:-${GROK_HOME:-$HOME/.grok}/auth.json}"
   if [ -z "$_gh" ] || [ -z "$_iso" ]; then
     echo "skip: mktemp failed"
   elif [ -n "$_key" ]; then
@@ -133,21 +132,46 @@ if have grok; then
     else
       echo "skip: isolated \`grok models\` (API-key) failed or timed out"
     fi
-  elif [ -f "$_ap" ] && [ -r "$_ap" ]; then
-    _out=$(
-      cd "$_iso" && env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin \
-        HOME="$_gh" GROK_HOME="$_gh" TMPDIR="$_gh" TERM=dumb \
-        GROK_TELEMETRY_ENABLED=false GROK_TELEMETRY_TRACE_UPLOAD=false \
-        GROK_EXTERNAL_OTEL=false GROK_AUTH_PATH="$_ap" \
-        perl -e 'alarm shift; exec @ARGV' 40 "$_grokbin" models 2>/dev/null
-    ) || _out=
-    if [ -n "$_out" ]; then
-      printf '%s\n' "$_out"
-    else
-      echo "skip: isolated \`grok models\` failed or timed out"
-    fi
   else
-    echo "skip: no XAI_API_KEY and no readable auth file (set GROK_AUTH_PATH or run grok login)"
+    # Subscription branch only: do not expand $HOME until we know we need a file.
+    if [ -n "${GROK_AUTH_PATH:-}" ]; then
+      _ap="$GROK_AUTH_PATH"
+    elif [ -n "${GROK_HOME:-}" ]; then
+      _ap="$GROK_HOME/auth.json"
+    elif [ -n "${HOME:-}" ]; then
+      _ap="$HOME/.grok/auth.json"
+    else
+      _ap=
+    fi
+    case "$_ap" in
+      "") echo "skip: no XAI_API_KEY and no auth path (set GROK_AUTH_PATH / GROK_HOME / HOME, or run grok login)" ;;
+      /*) ;;
+      *)
+        # Absolutize before cd into $_iso — same rule as grok_relay.
+        if [ "$(pwd)" -ef . ]; then
+          _ap="$(pwd)/$_ap"
+        else
+          echo "skip: working directory name is unsafe to prefix onto a relative GROK_AUTH_PATH"
+          _ap=
+        fi
+        ;;
+    esac
+    if [ -n "$_ap" ] && [ -f "$_ap" ] && [ -r "$_ap" ]; then
+      _out=$(
+        cd "$_iso" && env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin \
+          HOME="$_gh" GROK_HOME="$_gh" TMPDIR="$_gh" TERM=dumb \
+          GROK_TELEMETRY_ENABLED=false GROK_TELEMETRY_TRACE_UPLOAD=false \
+          GROK_EXTERNAL_OTEL=false GROK_AUTH_PATH="$_ap" \
+          perl -e 'alarm shift; exec @ARGV' 40 "$_grokbin" models 2>/dev/null
+      ) || _out=
+      if [ -n "$_out" ]; then
+        printf '%s\n' "$_out"
+      else
+        echo "skip: isolated \`grok models\` failed or timed out"
+      fi
+    elif [ -n "$_ap" ]; then
+      echo "skip: no readable auth file at the resolved path (set GROK_AUTH_PATH or run grok login)"
+    fi
   fi
   [ -n "${_gh:-}" ] && rm -rf "$_gh"
   [ -n "${_iso:-}" ] && rm -rf "$_iso"

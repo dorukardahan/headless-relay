@@ -45,6 +45,14 @@ else
     echo "FAIL: print-model-catalog.sh Grok catalog lost the API-key auth branch"
     fail=1
   }
+  grep -qF '${HOME:-}' "$ROOT/scripts/print-model-catalog.sh" || {
+    echo "FAIL: print-model-catalog.sh no longer guards \$HOME under set -u in the subscription branch"
+    fail=1
+  }
+  grep -qF '$(pwd)/$_ap' "$ROOT/scripts/print-model-catalog.sh" || {
+    echo "FAIL: print-model-catalog.sh no longer absolutizes a relative GROK_AUTH_PATH before cd"
+    fail=1
+  }
   grep -qF 'auth update disk written' "$ROOT/scripts/print-model-catalog.sh" || {
     echo "FAIL: print-model-catalog.sh no longer discloses in-place Grok token refresh"
     fail=1
