@@ -30,7 +30,7 @@ no argument is given (or the argument is `-`). If both are supplied, stdin is ap
 
 | Flag | Meaning |
 |------|---------|
-| `-m, --model <MODEL>` | Model id, e.g. `gpt-6-astra` (or `gpt-5.6-sol` if Astra is not on the account). Check with `codex debug models`, not `codex models`. Omit to use the `~/.codex/config.toml` default. |
+| `-m, --model <MODEL>` | Model id, e.g. `gpt-6-astra` (or `gpt-5.6-sol` if Astra is not on the account). Check with `codex debug models` (JSON catalog). Do not run `codex models` — that starts a session. Omit to use the `~/.codex/config.toml` default. |
 | `-c, --config <key=value>` | Override a config value (TOML). E.g. `-c model_reasoning_effort="ultra"`. |
 | `-s, --sandbox <MODE>` | `read-only` (default), `workspace-write`, `danger-full-access`. |
 | `--dangerously-bypass-approvals-and-sandbox` | No sandbox. EXTREMELY DANGEROUS; isolated containers only. |
