@@ -165,3 +165,11 @@ locally before being fixed. A 2026-09-21 docs refresh pins current example model
 `zai-coding-plan/glm-5.3` / `zai/glm-5.3` (ZCode recipes no longer default to GLM-5.2),
 and `Gemini 3.8 Flash (High)` (live `agy models` on agy 1.1.1). CLIs drift fast, so re-verify
 flags when something errors.
+
+2026-09-24 model update: OpenAI's `gpt-6-sol` and `gpt-6-luna` join `gpt-6-astra` as
+catalog-gated Codex choices. Check `codex debug models` on **your own account** before using
+either id; the runnable examples keep `gpt-5.6-sol` for machines without a verified
+new-generation CLI catalog. Anthropic's `claude-opus-5-5` (released 2026-09-22) requires
+Claude Code **2.1.280+**. An installed 2.1.260 rejects it with HTTP 400, so do not assume
+`--model` means the requested model actually ran: verify `modelUsage` in the CLI's JSON result.
+Neither the local Claude Code installation nor subscription auth is changed by this docs update.

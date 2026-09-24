@@ -3,8 +3,8 @@
 Full per-CLI detail for `headless-relay`. Flags verified 2026-07-02 against installed
 binaries: opencode 1.14.31, claude (Claude Code) 2.1.198, zcode CLI 0.15.0 (ZCode desktop app
 3.2.2, recipes re-verified on app 3.3.3); GPT section re-verified 2026-07-10 on codex-cli
-0.144.0 (GPT-5.6 launch) and refreshed 2026-09-21 for `gpt-6-astra` (Codex CLI id; account
-access still gated — if `codex debug models` does not list it, fall back to `gpt-5.6-sol`); Grok section re-verified 2026-07-08 on grok 0.2.91 (grok-4.5 launch),
+0.144.0 (GPT-5.6 launch) and refreshed for GPT-6 Astra / Sol / Luna (Codex CLI ids; account
+access still gated — inspect `codex debug models` before pinning); Grok section re-verified 2026-07-08 on grok 0.2.91 (grok-4.5 launch),
 then re-assessed 2026-07-15 after xAI open-sourced Grok Build (source audit of commit
 `c68e39f`) — the whole-repo bundle is gone from source; the residuals are the two-root
 global-rule leak (Claude/Cursor compat from `$HOME` + grok's own `~/.grok/AGENTS.md`) and the
@@ -30,7 +30,7 @@ no argument is given (or the argument is `-`). If both are supplied, stdin is ap
 
 | Flag | Meaning |
 |------|---------|
-| `-m, --model <MODEL>` | Model id, e.g. `gpt-6-astra` (or `gpt-5.6-sol` if Astra is not on the account). Check with `codex debug models` (JSON catalog). Do not run `codex models` — that starts a session. Omit to use the `~/.codex/config.toml` default. |
+| `-m, --model <MODEL>` | Model id, e.g. `gpt-6-sol` / `gpt-6-astra` (or `gpt-5.6-sol` if new ids are not on the account). Check with `codex debug models` (JSON catalog). Do not run `codex models` — that starts a session. Omit to use the `~/.codex/config.toml` default. |
 | `-c, --config <key=value>` | Override a config value (TOML). E.g. `-c model_reasoning_effort="ultra"`. |
 | `-s, --sandbox <MODE>` | `read-only` (default), `workspace-write`, `danger-full-access`. |
 | `--dangerously-bypass-approvals-and-sandbox` | No sandbox. EXTREMELY DANGEROUS; isolated containers only. |
@@ -72,20 +72,26 @@ codex exec --sandbox workspace-write \
   -c 'sandbox_workspace_write.network_access=true' "<task>"
 ```
 
-Models (GPT-6 Astra, 2026-09-03; Codex CLI id `gpt-6-astra`): `gpt-6-astra` is the current
-frontier coding/research/computer-use model. The GPT-5.6 family remains available:
+Models (GPT-6 Astra 2026-09-03; GPT-6 Sol and Luna 2026-09-22): `gpt-6-astra` remains
+the most capable frontier model, `gpt-6-sol` targets strong agentic coding at lower latency,
+and `gpt-6-luna` is the lighter high-volume option. Their Codex ids are exactly those slugs;
+API access/pricing and ChatGPT subscription quotas are different surfaces. The GPT-5.6 family remains available:
 `gpt-5.6-sol` (high-capability, broader access), `gpt-5.6-terra` (balanced), `gpt-5.6-luna`
 (fast/affordable); `gpt-5.5` and `gpt-5.4` moved to legacy. Check enrollment with
 `codex debug models` (JSON catalog; `--bundled` skips refresh). Do **not** run
 `codex models`: on the 0.144 series that is not a catalog subcommand, so it starts an
 interactive session with the leftover words as the prompt. If the catalog JSON does not
-contain `gpt-6-astra`, the account is not enrolled yet — use `gpt-5.6-sol`.
+contain the desired GPT-6 slug, that account is not shown as enrolled — keep a listed
+fallback such as `gpt-5.6-sol` instead of forcing an unlisted id.
 Reasoning effort ladder is `low | medium | high | xhigh | max | ultra` — `ultra` is
 "maximum reasoning with automatic task delegation" (codex may fan out its own subagents).
-Astra's documented API effort set is `low | medium | high | xhigh | max` (no `ultra`).
+Astra's documented API effort set is `low | medium | high | xhigh | max` (no `ultra`);
+Sol/Luna additionally accept `none` in the API. Codex's `ultra` is a product tier with
+automatic delegation, not an API reasoning value. The public API's 1.05M context for
+GPT-6 does **not** mean this CLI/account has a 1.05M window; check its live metadata.
 Two load-bearing notes, originally live-verified on 0.144.0 for the 5.6 family: those models
-DEFAULT TO `low` effort, so always pass `-c model="gpt-6-astra"` (or `gpt-5.6-sol`) plus
-`-c model_reasoning_effort="high"` / `"xhigh"` / `"max"` (or `"ultra"` on 5.6) explicitly for
+DEFAULT TO `low` effort, so pass a catalog-listed model plus
+`-c model_reasoning_effort="high"` / `"xhigh"` / `"max"` explicitly for
 review-grade output; and the 0.142.x exec flag semantics are unchanged
 (`--ask-for-approval` still rejected, network still requires the `-c` override above).
 
@@ -669,8 +675,8 @@ default mode needs no `OPENAI_API_KEY`; a CLI fallback `scripts/image_gen.py` us
 `gpt-image-2`). It works headless via `codex exec` — verified 2026-07-10 on codex-cli 0.144.0,
 which generated a blue-circle PNG into the target dir. Output also mirrors to
 `~/.codex/generated_images/<session>/exec-<uuid>.png`.
-The copy-paste pin below is `gpt-5.6-sol` so an unenrolled Astra account still runs.
-Switch to `gpt-6-astra` only after `codex debug models` lists that id.
+The copy-paste image pin below is the **tested** `gpt-5.6-sol`. Catalog presence of
+`gpt-6-sol`, `gpt-6-luna`, or `gpt-6-astra` is not image-gen proof for those ids.
 
 ```bash
 cd /path/to/output-dir
@@ -726,7 +732,15 @@ No image or video generation in `opencode` / `zcode` / `claude -p`. Text only.
 ## Claude — claude print mode
 
 `claude -p` / `--print` runs Claude Code non-interactively: same agent loop, prints a result,
-exits. Any CLI option works with `-p`.
+exits. Any CLI option works with `-p`. Anthropic released `claude-opus-5-5` on 2026-09-22;
+the **Claude Code binary must be 2.1.280+**. Version 2.1.260 rejects the id with HTTP 400
+even while logged in; no prompt content is a substitute for a supported CLI. In an allowed
+first-party Claude Code workflow, after checking version and auth, make one bounded
+tool-less call with `--model claude-opus-5-5 --safe-mode --tools "" --output-format json`
+and require success plus `modelUsage` containing `claude-opus-5-5`. Do not mistake a
+successful-looking text response or the requested flag for proof of the served model;
+do not auto-fallback to another id. For a non-Anthropic orchestrator, the compliance
+gate in `SKILL.md` still applies — a newer CLI does not relax it.
 
 | Flag | Meaning |
 |------|---------|
