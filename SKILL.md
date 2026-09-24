@@ -510,12 +510,12 @@ substitute a different model to fill the gap.
 
 | Model | Binary check | Auth / plan check |
 |-------|--------------|-------------------|
-| GPT (Codex) | `command -v codex` | fails fast with an auth error when logged out (`codex login`). Pin the model from `codex debug models` (JSON catalog, not a session): use `gpt-6-astra` only if that id is listed, otherwise `-c model="gpt-5.6-sol"`. Do not run `codex models` — on 0.144 that starts an interactive prompt. |
+| GPT (Codex) | `command -v codex` | fails fast with an auth error when logged out (`codex login`). Pin only an id listed by this account's `codex debug models` JSON catalog (`gpt-6-sol`, `gpt-6-luna`, or `gpt-6-astra` when enrolled); otherwise keep `-c model="gpt-5.6-sol"` if it is listed. Do not run `codex models` — on 0.144 that starts an interactive prompt. |
 | GLM via OpenCode | `command -v opencode` | `opencode auth list` shows a Z.AI credential |
 | GLM via ZCode | `command -v zcode` (add a PATH wrapper if only the app is installed) | `~/.zcode/cli/config.json` exists or `ZCODE_API_KEY` is set. `zcode login` is currently broken — see [references/cli-reference.md](references/cli-reference.md) |
 | Grok | `command -v grok` | Run `grok models` (catalog fetch, no model turn). A model list proves the CLI authenticated, even with a stale "not authenticated" header, but it does **not** prove `grok-4.7` access: require an exact `grok-4.7` entry under `Available models:` before setting `GROK_RELAY_MODEL=grok-4.7` for either helper. Otherwise retain the 4.6 default only if the list has `grok-4.6`, or set `GROK_RELAY_MODEL=grok-4.5` if only 4.5 is listed. If none is listed, skip the Grok lane; never guess a pin. With no model list, follow [the auth ladder](references/cli-reference.md). |
 | Gemini via Antigravity | `command -v agy` | `agy models` lists the model menu when logged in; the default model comes from the user's Antigravity config |
-| Claude | in-session already (native subagent); `command -v claude` only for headless | current session auth |
+| Claude | `command -v claude`; `claude --version` | `claude-opus-5-5` requires Claude Code 2.1.280+; 2.1.260 returns HTTP 400. Confirm signed-in status on the intended profile and the actual `modelUsage` id after a bounded run. Keep the compliance gate below. |
 
 Rules:
 - Example model ids in this skill are copy-paste pins, not a live menu. On this machine, run
@@ -791,8 +791,9 @@ directory:
 #      instead of calling the tool. `max` and below work fine (max ran in ~55s).
 #   2. Redirect stdin from /dev/null — a positional-arg prompt can otherwise block on
 #      "Reading additional input from stdin". macOS has no `timeout`; use perl's alarm.
-# Pin `gpt-5.6-sol` here: it is the broadly enrolled high-capability model. Switch the
-# `-c model=` value to `gpt-6-astra` only after `codex debug models` lists that id.
+# Pin `gpt-5.6-sol` here: this image recipe was smoke-tested on that id.
+# `gpt-6-sol`, `gpt-6-luna` and `gpt-6-astra` are newer text/agent models,
+# not proof that this image_gen recipe works on them. Test that separately.
 cd /path/to/output-dir
 perl -e 'alarm shift; exec @ARGV' 480 \
   codex exec --sandbox workspace-write -c model="gpt-5.6-sol" \
