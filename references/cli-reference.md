@@ -328,13 +328,18 @@ is a subshell (`name() ( … )`) with `set +eux` (xtrace off, so a key can't be 
 cleanup `trap`s on EXIT/INT/TERM/HUP. Scope is personal/consumer auth (subscription OAuth or
 `XAI_API_KEY`); team/enterprise managed-policy parity is unverified — managed-policy readers read
 `auth.json` directly from `GROK_HOME`, bypassing `GROK_AUTH_PATH`, so under the temp `GROK_HOME` it is
-not carried. The shape, for reference (use the real helpers in `SKILL.md`, don't hand-roll):
+not carried. Before any copy-paste call, check this login's authenticated `grok models`
+`Available models:` block. The snippets default to the previously supported 4.6;
+set `GROK_RELAY_MODEL=grok-4.7` only when that exact id is listed, or select a listed
+4.5 if 4.6 is absent. If none is available, skip Grok. The shape, for reference
+(use the real helpers in `SKILL.md`, don't hand-roll):
 
 ```bash
 gh=$(mktemp -d "${TMPDIR:-/tmp}/grok-home.XXXXXX")    # empty synthetic HOME + clean temp GROK_HOME (no external-config scan)
 iso=$(mktemp -d "${TMPDIR:-/tmp}/grok-iso.XXXXXX")     # empty non-git CWD (verify it is OUTSIDE any git worktree before use)
 ap="${GROK_AUTH_PATH:-${GROK_HOME:-$HOME/.grok}/auth.json}"   # real auth path (grok precedence), absolutised BEFORE the cd
 grokbin=$(command -v grok)                             # env -i uses a minimal PATH, so pass grok's absolute path
+model=${GROK_RELAY_MODEL:-grok-4.6}                    # choose 4.7 only if this login's catalog lists the exact id
 printf '[features]\ntelemetry = false\n[telemetry]\ntrace_upload = false\n[folder_trust]\nenabled = false\n[harness]\ndisable_codebase_upload = true\n[compat.claude]\nskills = false\nrules = false\nagents = false\nmcps = false\nhooks = false\nsessions = false\n[compat.cursor]\nskills = false\nrules = false\nagents = false\nmcps = false\nhooks = false\nsessions = false\n[compat.codex]\nskills = false\nrules = false\nagents = false\nmcps = false\nhooks = false\nsessions = false\n' > "$gh/config.toml"
 # HERMETIC: env -i is an ALLOWLIST — only these vars reach grok; EVERYTHING else (your other secrets
 # AND grok's endpoint/proxy/auth-provider-command/log/managed-config/compat overrides) is dropped.
@@ -368,7 +373,7 @@ relayauth_profile() (   # $1 = auth.json path, $2 = the temp GROK_HOME to write 
 if relayauth_profile "$ap" "$gh"; then
   ( cd "$iso" && env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin HOME="$gh" GROK_HOME="$gh" TMPDIR="$gh" TERM=dumb \
       GROK_TELEMETRY_ENABLED=false GROK_TELEMETRY_TRACE_UPLOAD=false GROK_EXTERNAL_OTEL=false GROK_AUTH_PATH="$ap" \
-      "$grokbin" -p "…" -m grok-4.6 --disable-web-search --sandbox relayauth --deny '*' )
+      "$grokbin" -p "…" -m "$model" --disable-web-search --sandbox relayauth --deny '*' )
 else
   echo "unsafe auth dir — not starting grok" >&2   # never `exit` in a pasteable block: it would close an interactive shell
 fi
@@ -412,11 +417,14 @@ from source. Provenance is mixed — labels below; verify per version:
 
 See the helper definitions and kill-switch notes in `SKILL.md`.
 
-Headless via `-p`. Use `-m grok-4.6` — xAI's coding/agents frontier model (launched
-2026-08-12; 500K context; $2/$6 per 1M tokens; a 2x-price faster variant also exists).
-It is the CLI default since 2026-08-12 (verified on grok 1.0.3), but pass `-m` explicitly
-anyway: defaults drift. `grok-4.5` (2026-07-08, trained with Cursor) is still served, and
-the alternative `grok-composer-2.5-fast` (Cursor's fast coding model) is a lighter tier. The
+Headless via `-p`. Use `-m grok-4.7` only if this login's `grok models` output lists the
+exact id under `Available models:` — xAI's coding/agents frontier model (launched
+2026-09-21; 500K context; same published $2/$6 per 1M tokens class as 4.6).
+Pass `-m` explicitly: defaults drift. The helper defaults to 4.6 for older accounts;
+select 4.7 with `GROK_RELAY_MODEL=grok-4.7` only after that account-catalog check.
+If 4.6 is absent too, use a listed 4.5 or skip Grok. `grok-4.6` (2026-08-12) remains served as the previous
+flagship, and `grok-4.5` (2026-07-08, trained with Cursor) is still served. The
+alternative `grok-composer-2.5-fast` (Cursor's fast coding model) is a lighter tier. The
 former `grok-build` model id was RETIRED from the CLI at the 4.5 launch and now fails with
 `unknown model id`; the separate `grok-build-0.1` survives only on the metered Code API, not
 as a CLI model.
@@ -426,7 +434,7 @@ as a CLI model.
 | `-p, --single <PROMPT>` | Single-turn prompt to stdout, then exit. |
 | `--prompt-file <PATH>` | Single-turn prompt from a file. |
 | `--prompt-json <JSON>` | Prompt as JSON content blocks. |
-| `-m, --model <MODEL>` | Model id, e.g. `grok-4.6`. |
+| `-m, --model <MODEL>` | Model id, e.g. `grok-4.7`. |
 | `--sandbox <PROFILE>` | Seatbelt profile: builtin `strict` / `workspace`, or custom from `$GROK_HOME/sandbox.toml` (`[profiles.X]` with `extends` + `read_only` / `read_write` DIRECTORY lists). 1.0.x change: kernel-enforced — `strict` denies file reads outside cwd / `GROK_HOME` / `TMPDIR`, so subscription auth via an outside `GROK_AUTH_PATH` fails with "Not signed in"; the helpers ship `relayauth` (strict + read_write on only the auth dir). An unappliable CUSTOM profile makes grok refuse to start (fail closed, verified on 1.0.3); an unappliable BUILT-IN profile only warns and continues unenforced. The grant is bounded: the resolved dir must actually hold the credential, and is never `/`, never `$HOME` or an ancestor, never a git repository (worktree or bare), never carries `*` `?` `[`, a control character, or a leading/trailing ASCII space or tab (grok reads a trailing `/*` as the PARENT dir and skips other globs), resolved physically, TOML-safe. |
 | `--output-format <FMT>` | `plain` (default), `json`, `streaming-json`. |
 | `--disable-web-search` | Disable web search + fetch. Mandatory for diff-deterministic review. |
@@ -455,11 +463,12 @@ gh=$(mktemp -d "${TMPDIR:-/tmp}/grok-home.XXXXXX")
 iso=$(mktemp -d "${TMPDIR:-/tmp}/grok-iso.XXXXXX")
 ap="${GROK_AUTH_PATH:-${GROK_HOME:-$HOME/.grok}/auth.json}"
 grokbin=$(command -v grok)
+model=${GROK_RELAY_MODEL:-grok-4.6}  # select 4.7 only after the account-catalog gate above
 # relayauth_profile is defined in the "Data egress" section above — it bounds the grant before writing
 relayauth_profile "$ap" "$gh" || echo "unsafe auth dir — grok will fail to authenticate" >&2   # no `exit`: this block is pasted into a live shell
 ( cd "$iso" && env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin HOME="$gh" GROK_HOME="$gh" TMPDIR="$gh" TERM=dumb \
     GROK_TELEMETRY_ENABLED=false GROK_TELEMETRY_TRACE_UPLOAD=false GROK_EXTERNAL_OTEL=false GROK_AUTH_PATH="$ap" \
-    RUST_LOG=debug "$grokbin" -p "test" -m grok-4.6 --disable-web-search --sandbox relayauth --deny '*' 2>/tmp/grok-debug.log ) &
+    RUST_LOG=debug "$grokbin" -p "test" -m "$model" --disable-web-search --sandbox relayauth --deny '*' 2>/tmp/grok-debug.log ) &
 GROK_PID=$!; sleep 75; grep -c errorcode_502 /tmp/grok-debug.log; kill "$GROK_PID" 2>/dev/null
 rm -rf "$gh" "$iso"
 ```
@@ -537,12 +546,13 @@ Walk this ladder in order and stop at the first verdict:
    iso=$(mktemp -d "${TMPDIR:-/tmp}/grok-iso.XXXXXX")
    ap="${GROK_AUTH_PATH:-${GROK_HOME:-$HOME/.grok}/auth.json}"
    grokbin=$(command -v grok)
+   model=${GROK_RELAY_MODEL:-grok-4.6}  # only opt into 4.7 after an exact `Available models:` match
    # relayauth_profile is defined in the "Data egress" section above — it bounds the grant before writing
    relayauth_profile "$ap" "$gh" || echo "unsafe auth dir — grok will fail to authenticate" >&2   # no `exit`: this block is pasted into a live shell
    ( cd "$iso" && env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin HOME="$gh" GROK_HOME="$gh" TMPDIR="$gh" TERM=dumb \
        GROK_TELEMETRY_ENABLED=false GROK_TELEMETRY_TRACE_UPLOAD=false GROK_EXTERNAL_OTEL=false GROK_AUTH_PATH="$ap" \
        perl -e 'alarm shift; exec @ARGV' 120 \
-       "$grokbin" -p "Reply with exactly GROK_OK and nothing else." -m grok-4.6 --disable-web-search --sandbox relayauth --deny '*' ); rc=$?
+       "$grokbin" -p "Reply with exactly GROK_OK and nothing else." -m "$model" --disable-web-search --sandbox relayauth --deny '*' ); rc=$?
    rm -rf "$gh" "$iso"
    ```
 
@@ -815,9 +825,9 @@ structured output for the precise reason. When capturing a piped tool's exit thr
 | Grok stderr noise: `AuthorizationRequired`, `Skipping MCP tool` (stdout still arrives) | Cosmetic startup noise + digit-prefixed MCP tool names | Pipe `2>/dev/null` |
 | Grok `-p` hangs 2+ min, no stdout (stderr may show `worker quit with fatal … Auth(AuthorizationRequired)`, or nothing) | Provider-side 502 from `cli-chat-proxy.grok.com` (CLI swallows it), or a stale cached token | Run the `RUST_LOG=debug` diagnosis in the Grok section: 502s in the log = provider outage, skip Grok and retry later; no 502s + fatal auth line = `grok login` + one retry. Wrap unattended calls in a timeout |
 | Grok surfaces unrelated tweets/blogs as "evidence" | Web search left on | Add `--disable-web-search` |
-| Grok: `Couldn't set model 'grok-build': Invalid params: "unknown model id"` | `grok-build` retired from the CLI at the grok-4.5 launch (2026-07-08) | Use a current id, e.g. `-m grok-4.6` |
+| Grok: `Couldn't set model 'grok-build': Invalid params: "unknown model id"` | `grok-build` retired from the CLI at the grok-4.5 launch (2026-07-08) | Use an id listed for this account, e.g. `-m grok-4.7` only when `grok models` lists it |
 | Grok: `grok models` prints "You are not authenticated." though login should be fine | Header mirrors an expired cached access token read at process start; the same call then refreshes and fetches the catalog (routine after idle) | If a model list appears below the header → **available**, use the lane. Only "not authenticated" with NO model list is real: auth.json present → one bounded real call decides; auth.json absent → `grok login`. Match on `Available models:` / `Default model:`, not the header. `--yolo` / `--always-approve` are permission flags, never the fix |
-| Grok answer seems shallow | A lighter model (e.g. `grok-composer-2.5-fast`) was selected | Pass `-m grok-4.6` explicitly |
+| Grok answer seems shallow | A lighter model (e.g. `grok-composer-2.5-fast`) was selected | Pin an id shown in this account's `grok models`; use `-m grok-4.7` only if explicitly listed |
 | OpenCode `-f` file attach errors | Known `-f` issue on some versions | Pipe the prompt on stdin instead |
 | zcode: `Model config is missing. Create ~/.zcode/cli/config.json …` | No CLI config and no env vars | Apply Recipe A, B, or C above |
 | zcode config written but `model: Invalid input` in `~/.zcode/cli/log/` | `model.main` written as an object or bad ref | `model.main` must be a `provider/model` STRING, e.g. `"zai/glm-5.3"` |
