@@ -126,6 +126,18 @@ grep -qF 'scripts/print-model-catalog.sh' "$ROOT/README.md" || {
   fail=1
 }
 
+# New Grok generations are account-specific. The two copy-paste helpers must
+# keep a known prior default and make 4.7 an explicit catalog-gated opt-in.
+if [ "$(grep -Fc 'model=${GROK_RELAY_MODEL:-grok-4.6}' "$ROOT/SKILL.md")" -ne 2 ] ||
+   [ "$(grep -Fc -- '-m "$model" --disable-web-search' "$ROOT/SKILL.md")" -ne 4 ]; then
+  echo "FAIL: Grok helpers lost the account-gated model selection"
+  fail=1
+fi
+grep -qF 'require an exact `grok-4.7` entry under `Available models:`' "$ROOT/SKILL.md" || {
+  echo "FAIL: Grok 4.7 preflight no longer checks the authenticated account catalog"
+  fail=1
+}
+
 for f in README.md SKILL.md references/cli-reference.md; do
   # A line that mentions the bad subcommand must also be a warning, not a how-to.
   awk -v F="$f" '

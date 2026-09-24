@@ -97,9 +97,11 @@ managed policy is NOT carried (see [SECURITY.md](SECURITY.md)).**
 # file and passes no auth PATH in this branch) + ALL tools denied + a real
 # watchdog timeout. The wrapper's control state (the answer file) lives in a SEPARATE base that grok is
 # never given a path under. Answer -> stdout.  Usage: grok_relay "your question"
-# [GROK_RELAY_TIMEOUT=secs, default 300]
+# [GROK_RELAY_TIMEOUT=secs, default 300; GROK_RELAY_MODEL=verified catalog id]
 grok_relay() (
   { set +eux; } 2>/dev/null                                  # subshell-local: no errexit/nounset/xtrace (xtrace off => no key on stderr)
+  model=${GROK_RELAY_MODEL:-grok-4.6}                         # 4.7 is opt-in after exact account-catalog verification
+  case "$model" in grok-4.5|grok-4.6|grok-4.7) ;; *) echo "grok_relay: unsupported model id" >&2; exit 2 ;; esac
   _kids(){ for __k in $(ps -A -o pid=,ppid= 2>/dev/null | awk -v p="$1" '$2==p{print $1}'); do _kids "$__k"; echo "$__k"; done; }
   _killn(){ while IFS= read -r __q; do [ -n "$__q" ] && kill "-$1" "$__q" 2>/dev/null; done; }
   _tree(){ [ -n "${1:-}" ] || return 0; __L=$({ echo "$1"; _kids "$1"; }); printf '%s\n' "$__L" | _killn TERM; sleep 0.3; printf '%s\n' "$__L" | _killn KILL; }
@@ -177,11 +179,11 @@ sessions = false
   if [ -n "$key" ]; then                                     # API key: no auth file read; env -i drops GROK_DISABLE_API_KEY_AUTH etc.
     ( cd "$iso" && exec env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin HOME="$hm" GROK_HOME="$gkh" TMPDIR="$tmp" TERM=dumb \
         GROK_TELEMETRY_ENABLED=false GROK_TELEMETRY_TRACE_UPLOAD=false GROK_EXTERNAL_OTEL=false GROK_WORKSPACE_DATA_COLLECTION_DISABLED=true XAI_API_KEY="$key" \
-        "$grokbin" -p "$1" -m grok-4.7 --disable-web-search --sandbox strict --deny '*' ) > "$base/out" 2>/dev/null &
+        "$grokbin" -p "$1" -m "$model" --disable-web-search --sandbox strict --deny '*' ) > "$base/out" 2>/dev/null &
   else                                                       # subscription: only GROK_AUTH_PATH reaches grok (GROK_AUTH inline etc. dropped by env -i)
     ( cd "$iso" && exec env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin HOME="$hm" GROK_HOME="$gkh" TMPDIR="$tmp" TERM=dumb \
         GROK_TELEMETRY_ENABLED=false GROK_TELEMETRY_TRACE_UPLOAD=false GROK_EXTERNAL_OTEL=false GROK_WORKSPACE_DATA_COLLECTION_DISABLED=true GROK_AUTH_PATH="$ap" \
-        "$grokbin" -p "$1" -m grok-4.7 --disable-web-search --sandbox relayauth --deny '*' ) > "$base/out" 2>/dev/null &
+        "$grokbin" -p "$1" -m "$model" --disable-web-search --sandbox relayauth --deny '*' ) > "$base/out" 2>/dev/null &
   fi
   child=$!
   __pg=$(ps -o pgid= -p "$child" 2>/dev/null | tr -d ' '); [ -n "$__pg" ] && [ "$__pg" = "$child" ] && pgok=1   # negative-kill ONLY if grok is VERIFIED to be its own process-group leader; false on dash (job control off) / zsh (set -m rejected) -> pgok stays 0
@@ -238,9 +240,11 @@ lane with video:
 # (signal / timeout, via a ps-walk on all shells, plus a VERIFIED process-group kill on sh/bash). After
 # grok's own normal/nonzero exit the helper does NOT chase a detached descendant (no post-wait negative
 # kill — the pgid could be reused); that cleanup is out of scope and needs an OS sandbox.
-# Usage: grok_media /abs/brief.md /abs/out-dir   [GROK_MEDIA_TIMEOUT=secs, default 600]
+# Usage: grok_media /abs/brief.md /abs/out-dir   [GROK_MEDIA_TIMEOUT=secs, default 600; GROK_RELAY_MODEL=verified catalog id]
 grok_media() (
   { set +eux; } 2>/dev/null
+  model=${GROK_RELAY_MODEL:-grok-4.6}                         # same explicit, catalog-gated opt-in as grok_relay
+  case "$model" in grok-4.5|grok-4.6|grok-4.7) ;; *) echo "grok_media: unsupported model id" >&2; exit 2 ;; esac
   _kids(){ for __k in $(ps -A -o pid=,ppid= 2>/dev/null | awk -v p="$1" '$2==p{print $1}'); do _kids "$__k"; echo "$__k"; done; }
   _killn(){ while IFS= read -r __q; do [ -n "$__q" ] && kill "-$1" "$__q" 2>/dev/null; done; }
   _tree(){ [ -n "${1:-}" ] || return 0; __L=$({ echo "$1"; _kids "$1"; }); printf '%s\n' "$__L" | _killn TERM; sleep 0.3; printf '%s\n' "$__L" | _killn KILL; }
@@ -343,11 +347,11 @@ sessions = false
   if [ -n "$key" ]; then
     ( cd "$iso" && exec env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin HOME="$hm" GROK_HOME="$gkh" TMPDIR="$tmp" TERM=dumb \
         GROK_TELEMETRY_ENABLED=false GROK_TELEMETRY_TRACE_UPLOAD=false GROK_EXTERNAL_OTEL=false GROK_WORKSPACE_DATA_COLLECTION_DISABLED=true XAI_API_KEY="$key" \
-        "$grokbin" -p "$briefdata" -m grok-4.7 --disable-web-search --sandbox strict --tools "$mt" --disallowed-tools search_tool,use_tool ) >/dev/null 2>&1 &
+        "$grokbin" -p "$briefdata" -m "$model" --disable-web-search --sandbox strict --tools "$mt" --disallowed-tools search_tool,use_tool ) >/dev/null 2>&1 &
   else
     ( cd "$iso" && exec env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin HOME="$hm" GROK_HOME="$gkh" TMPDIR="$tmp" TERM=dumb \
         GROK_TELEMETRY_ENABLED=false GROK_TELEMETRY_TRACE_UPLOAD=false GROK_EXTERNAL_OTEL=false GROK_WORKSPACE_DATA_COLLECTION_DISABLED=true GROK_AUTH_PATH="$ap" \
-        "$grokbin" -p "$briefdata" -m grok-4.7 --disable-web-search --sandbox relayauth --tools "$mt" --disallowed-tools search_tool,use_tool ) >/dev/null 2>&1 &
+        "$grokbin" -p "$briefdata" -m "$model" --disable-web-search --sandbox relayauth --tools "$mt" --disallowed-tools search_tool,use_tool ) >/dev/null 2>&1 &
   fi
   child=$!
   __pg=$(ps -o pgid= -p "$child" 2>/dev/null | tr -d ' '); [ -n "$__pg" ] && [ "$__pg" = "$child" ] && pgok=1   # negative-kill ONLY if grok is VERIFIED to be its own process-group leader; false on dash (job control off) / zsh (set -m rejected) -> pgok stays 0, so no unverified process-group kill
@@ -509,7 +513,7 @@ substitute a different model to fill the gap.
 | GPT (Codex) | `command -v codex` | fails fast with an auth error when logged out (`codex login`). Pin the model from `codex debug models` (JSON catalog, not a session): use `gpt-6-astra` only if that id is listed, otherwise `-c model="gpt-5.6-sol"`. Do not run `codex models` — on 0.144 that starts an interactive prompt. |
 | GLM via OpenCode | `command -v opencode` | `opencode auth list` shows a Z.AI credential |
 | GLM via ZCode | `command -v zcode` (add a PATH wrapper if only the app is installed) | `~/.zcode/cli/config.json` exists or `ZCODE_API_KEY` is set. `zcode login` is currently broken — see [references/cli-reference.md](references/cli-reference.md) |
-| Grok | `command -v grok` | Run `grok models` (a catalog fetch — no repo bundle, no model turn). Grok is available if the output lists models (`Default model:` / `Available models:`), EVEN IF a "You are not authenticated." line appears above the list — that header just mirrors an expired cached token that the same call silently refreshes before fetching the catalog. Only "not authenticated" with NO model list is a real problem: auth.json missing → logged out; auth.json present → confirm with one bounded real call via `grok_relay`. Walk the availability ladder in [references/cli-reference.md](references/cli-reference.md) |
+| Grok | `command -v grok` | Run `grok models` (catalog fetch, no model turn). A model list proves the CLI authenticated, even with a stale "not authenticated" header, but it does **not** prove `grok-4.7` access: require an exact `grok-4.7` entry under `Available models:` before setting `GROK_RELAY_MODEL=grok-4.7` for either helper. Otherwise retain the 4.6 default only if the list has `grok-4.6`, or set `GROK_RELAY_MODEL=grok-4.5` if only 4.5 is listed. If none is listed, skip the Grok lane; never guess a pin. With no model list, follow [the auth ladder](references/cli-reference.md). |
 | Gemini via Antigravity | `command -v agy` | `agy models` lists the model menu when logged in; the default model comes from the user's Antigravity config |
 | Claude | in-session already (native subagent); `command -v claude` only for headless | current session auth |
 
@@ -517,6 +521,11 @@ Rules:
 - Example model ids in this skill are copy-paste pins, not a live menu. On this machine, run
   `sh scripts/print-model-catalog.sh` (catalog-only: `codex debug models`, `agy models`,
   `grok models`). Do not run `codex models` — on 0.144 that starts a session.
+- `grok_relay` and `grok_media` default to `grok-4.6` for existing accounts. Set
+  `GROK_RELAY_MODEL=grok-4.7` only after this login's `Available models:` block lists that
+  exact id. If it lists 4.5 but not 4.6/4.7, use `GROK_RELAY_MODEL=grok-4.5`.
+  An unsupported id fails before launching Grok; model presence is checked by the operator
+  against the authenticated catalog, not inferred from the published launch date.
 - Missing binary or failed auth means that model is unavailable. Report it plainly ("Grok CLI not
   installed / not logged in — skipping") and continue with the models that ARE available.
 - If the user asked for ONLY an unavailable model, stop and ask how to proceed (install it, or
@@ -881,7 +890,7 @@ while a same-provider second opinion should stay in-session as a subagent.
 | Grok says a tool was "blocked by policy" | Expected under `grok_relay`'s `--deny '*'` — a text relay needs no tools, the text answer still arrives. For media use `grok_media` (allow-lists only the 4 media tools via `--tools`, so image_gen still runs) |
 | Grok exits 1 instantly, stderr `Not signed in` though `grok login` is fine (subscription auth) | grok 1.0.x's seatbelt is kernel-enforced: plain `--sandbox strict` denies reading `GROK_AUTH_PATH` outside the sandbox | Already handled since v3.1.0: the helpers write `$GROK_HOME/sandbox.toml` (`relayauth` = strict + read_write on only the auth dir) and pass `--sandbox relayauth`. Seeing this means a pre-v3.1.0 helper on grok 1.0.x — update the skill |
 | Grok's answer references your `~/.claude` rules / `AGENTS.md` / a convention you didn't send | The isolation was skipped (raw `grok` call). `~/.claude` / `~/.cursor` rules load from `$HOME` (compat scan); `~/.grok/AGENTS.md` loads from `$GROK_HOME` (grok's own scan). Always call through `grok_relay` / `grok_media` — they run under an empty `HOME` AND a clean temp `GROK_HOME`, closing both |
-| Grok: `Couldn't set model 'grok-build': … "unknown model id"` | `grok-build` was retired from the CLI when grok-4.5 launched (July 2026) — use a current id, e.g. `-m grok-4.7` (`grok models` lists what your login serves) |
+| Grok: `Couldn't set model 'grok-build': … "unknown model id"` | `grok-build` was retired from the CLI when grok-4.5 launched (July 2026) — use a current id listed by this account's `grok models`; `-m grok-4.7` is valid only if it appears there |
 | zcode: `Model config is missing. Create ~/.zcode/cli/config.json …` | One-time setup — follow the ZCode recipes in [references/cli-reference.md](references/cli-reference.md) |
 | `zcode login`: `OAuth response is not valid JSON` | Known open bug — skip login entirely; use the config-file or env-var recipe instead |
 | OpenCode `-f` file attach errors | Pipe via stdin instead (`cat file \| opencode run …`) |
