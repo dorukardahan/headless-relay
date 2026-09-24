@@ -752,6 +752,43 @@ successful-looking text response or the requested flag for proof of the served m
 do not auto-fallback to another id. For a non-Anthropic orchestrator, the compliance
 gate in `SKILL.md` still applies — a newer CLI does not relax it.
 
+On an account with Claude Code **2.1.280+**, verify the served model with a bounded,
+tool-less print-mode turn (this sends only the synthetic prompt to Anthropic; it
+prints no response or credential content):
+
+```bash
+python3 - <<'PY'
+import json
+import subprocess
+import sys
+
+try:
+    run = subprocess.run(
+        ["claude", "-p", "Reply with exactly OPUS55_PROBE_OK. Do not use tools.",
+         "--model", "claude-opus-5-5", "--safe-mode", "--tools", "",
+         "--no-session-persistence", "--output-format", "json"],
+        capture_output=True, text=True, timeout=90, check=False,
+    )
+except subprocess.TimeoutExpired:
+    sys.exit("Claude model probe timed out")
+if run.returncode != 0:
+    sys.exit("Claude Code rejected the bounded model probe; check version/auth")
+try:
+    result = json.loads(run.stdout)
+except json.JSONDecodeError:
+    sys.exit("Claude Code did not return JSON")
+if not isinstance(result, dict):
+    sys.exit("Claude Code returned an unexpected JSON shape")
+served = result.get("modelUsage")
+if result.get("is_error") or not isinstance(served, dict) or "claude-opus-5-5" not in served:
+    sys.exit("Requested Claude model was not confirmed by modelUsage")
+print("OPUS55_MODEL_CONFIRMED")
+PY
+```
+
+Treat any nonzero/timeout/mismatched `modelUsage` as unavailable; do not fall back
+silently or call the print-mode probe an authenticated subscription success.
+
 | Flag | Meaning |
 |------|---------|
 | `--model <model>` | Alias (`fable`, `opus`, `sonnet`) or full name (`claude-fable-5-1`). |

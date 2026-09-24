@@ -138,6 +138,15 @@ grep -qF 'require an exact `grok-4.7` entry under `Available models:`' "$ROOT/SK
   fail=1
 }
 
+# A requested Claude model id is not proof of the served model. Keep the
+# documented Opus 5.5 probe bounded, noninteractive and tied to modelUsage.
+for needle in '"claude", "-p"' '"--model", "claude-opus-5-5"' '"--tools", ""' '"--output-format", "json"' 'timeout=90, check=False' 'result.get("modelUsage")' '"claude-opus-5-5" not in served'; do
+  grep -qF -- "$needle" "$ROOT/references/cli-reference.md" || {
+    echo "FAIL: Claude Opus 5.5 probe lost a bounded served-model assertion"
+    fail=1
+  }
+done
+
 for f in README.md SKILL.md references/cli-reference.md; do
   # A line that mentions the bad subcommand must also be a warning, not a how-to.
   awk -v F="$f" '
