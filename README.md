@@ -3,7 +3,8 @@
 headless-relay is an [Agent Skill](https://agentskills.io) that lets your coding agent use
 the other AI models installed on your machine, without you leaving the session. You say
 "ask Codex what it thinks of this function", "get a second opinion on this bug from GLM and
-Grok", or "have Gemini generate an image for this post". Your agent quietly runs the right
+Grok", "have Gemini generate an image for this post", or "have Gemini watch this clip and
+transcribe it". Your agent quietly runs the right
 tool in the background, reads the answer, and reports back to you. No new accounts, no API
 juggling: it drives the AI tools you already have, with the logins you already use.
 
@@ -112,8 +113,10 @@ git clone https://github.com/dorukardahan/headless-relay.git ~/.claude/skills/he
 At least one target-model CLI installed and authenticated:
 
 - `codex` (OpenAI Codex CLI) with a ChatGPT plan or API key
-- `opencode` with a Z.ai Coding Plan credential, and/or the ZCode desktop app (its bundled
-  `zcode` command works headlessly after a one-time setup, see `references/cli-reference.md`)
+- `opencode` with a Z.ai Coding Plan credential (the headless CLI in `~/.opencode/bin` is
+  updated separately from the OpenCode desktop app), and/or the ZCode desktop app (its bundled
+  `zcode` command works headlessly after a one-time setup; app 3.14.5 also needs a small
+  symlink shim, see `references/cli-reference.md`)
 - `grok` (xAI Grok Build) with a SuperGrok login (or `XAI_API_KEY`). Note: the skill runs Grok
   under a hermetic `env -i` + empty `HOME` + a clean temp `GROK_HOME` with its tool use locked down — belt-and-suspenders now
   that xAI has open-sourced Grok Build and a source audit found the old whole-repo upload path gone.
@@ -122,6 +125,7 @@ At least one target-model CLI installed and authenticated:
   Install: `curl -fsSL https://antigravity.google/cli/install.sh | bash`
 - `claude` (Claude Code), only usable as a TARGET when the orchestrator is first-party
   Claude Code; see the compliance gate in `SKILL.md`
+- Optional: `ffmpeg`, to re-encode clips before a video-understanding run
 
 The skill degrades gracefully: unavailable models are reported and skipped, never silently
 substituted.
