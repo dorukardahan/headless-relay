@@ -808,19 +808,26 @@ crowd laughter):
 | Grok 4.7 (`grok` 1.0.50) | **NO** | Nothing usable (below) |
 | GPT (Codex), Claude | Not tested in this pass | — |
 
-**Gemini recipe.** Put the clip alone in an empty directory (re-encode 4K footage to ~540p
-first: smaller upload, same answer), make that directory the workspace, run it solo (the agy
-burst hang applies) and cap it with a timeout:
+**Gemini recipe.** Put the clip alone in a freshly created private directory (re-encode 4K
+footage to ~540p first: smaller upload, same answer), make that directory the workspace, run it
+solo (the agy burst hang applies) and cap it with a timeout:
 
 ```bash
-mkdir -p /tmp/watch && ffmpeg -nostdin -y -v error -i input.mp4 -vf scale=-2:540 \
-  -c:v libx264 -crf 30 -c:a aac -b:a 96k /tmp/watch/clip.mp4
-cd /tmp/watch && agy -p "$(cat /tmp/watch-prompt.md)" --model "Gemini 3.8 Flash (High)" \
-  --add-dir /tmp/watch </dev/null
+# fresh private workspace per clip: never reuse a shared dir (agy gets read access to all of it)
+W=$(mktemp -d "${TMPDIR:-/tmp}/watch.XXXXXX") && trap 'rm -rf "$W"' EXIT
+ffmpeg -nostdin -v error -i input.mp4 -vf scale=-2:540 \
+  -c:v libx264 -crf 30 -c:a aac -b:a 96k "$W/clip.mp4"
+# macOS has no `timeout`; perl's alarm bounds the run (agy can hang)
+P=$(cat watch-prompt.md)   # read the prompt before cd; keep it out of the workspace
+( cd "$W" && perl -e 'alarm shift; exec @ARGV' 300 \
+    agy -p "$P" --model "Gemini 3.8 Flash (High)" --add-dir "$W" </dev/null )
 ```
 
 Tell it to only read `clip.mp4`, not to search or create files, to mark unclear words as
-`[unclear]`, and to say so if it cannot hear audio. In a `while read` loop over many clips,
+`[unclear]`, and to say so if it cannot hear audio. Keep the prompt to watching the clip: a prompt
+that also asks it to list the directory or use another tool can end with `jetski: no output
+produced — a tool required the "mcp" permission that headless mode cannot prompt for` (seen
+2026-10-09; the same recipe with a watch-only prompt answered). In a `while read` loop over many clips,
 use `ffmpeg -nostdin` (ffmpeg otherwise eats the loop's stdin).
 
 **GLM: why the CLIs fail, and the path that works.**
@@ -1020,6 +1027,7 @@ structured output for the precise reason. When capturing a piped tool's exit thr
 | agy file operations land in `~/.gemini/antigravity-cli/scratch` | Antigravity's default working dir is its own scratch workspace, not your cwd | Pass `--add-dir /path/to/repo` (it becomes the working directory); use absolute paths in prompts |
 | agy: `flag needs an argument: -print` | stdin piping is not supported | Use `agy -p "$(cat file)"` — quoted command substitution passes the bytes verbatim |
 | agy modifies files you only wanted reviewed | Print mode runs tools unprompted (yolo-like) | Add `--mode plan` (advice-only) or `--sandbox` |
+| agy: `jetski: no output produced — a tool required the "mcp" permission …` | The prompt made agy reach for a tool that headless mode auto-denies (e.g. listing a directory) | Keep the prompt to the task (e.g. watch only `clip.mp4`) and rerun; do not reach for `--dangerously-skip-permissions` |
 | agy `-p` hangs forever inside a parallel multi-CLI burst | agy 1.1.0 timing/load bug when 3+ other model CLIs run concurrently (solo/pairwise reliable; stagger insufficient) | Run the Gemini lane sequentially around the burst; always cap agy with a timeout |
 | CLI missing or "not authenticated" | Not installed / logged out | Report it, skip that model; run `codex login` / `opencode auth login` / `grok login` as needed — do not substitute another model silently. Exception: Grok's "not authenticated" from `grok models` is not conclusive — walk the Grok availability ladder first |
 | Long run hangs the shell tool | Tool-level timeout | Set an explicit timeout, or run in background and poll |

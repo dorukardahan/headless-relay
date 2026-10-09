@@ -845,9 +845,12 @@ brand risks) is not the same as generating one. Live-tested 2026-10-09:
 | GPT (Codex), Claude | Not tested |
 
 ```bash
-# Gemini: clip alone in an empty dir (re-encode 4K to ~540p first), run solo, cap with a timeout
-cd /tmp/watch && agy -p "$(cat /tmp/watch-prompt.md)" --model "Gemini 3.8 Flash (High)" \
-  --add-dir /tmp/watch </dev/null
+# Gemini: clip alone in a fresh private dir (re-encode 4K to ~540p first), run solo, bounded
+W=$(mktemp -d "${TMPDIR:-/tmp}/watch.XXXXXX") && trap 'rm -rf "$W"' EXIT
+ffmpeg -nostdin -v error -i input.mp4 -vf scale=-2:540 -c:v libx264 -crf 30 -c:a aac "$W/clip.mp4"
+P=$(cat watch-prompt.md)   # read the prompt before cd; keep it out of the workspace
+( cd "$W" && perl -e 'alarm shift; exec @ARGV' 300 \
+    agy -p "$P" --model "Gemini 3.8 Flash (High)" --add-dir "$W" </dev/null )
 ```
 
 The prompt should say: read only `clip.mp4`, no web search, no new files, timestamps, verbatim
