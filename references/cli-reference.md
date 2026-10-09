@@ -815,7 +815,7 @@ solo (the agy burst hang applies) and cap it with a timeout:
 ```bash
 # fresh private workspace per clip: never reuse a shared dir (agy gets read access to all of it)
 watch_clip() (   # subshell: its own EXIT trap, so each clip's workspace is removed, also in a loop
-  W=$(mktemp -d "${TMPDIR:-/tmp}/watch.XXXXXX") || exit 1
+  W=$(mktemp -d "${TMPDIR:-/tmp}/watch.XXXXXX") && W=$(cd "$W" && pwd -P) || exit 1   # absolute, even if TMPDIR is relative
   trap 'rm -rf "$W"' EXIT
   ffmpeg -nostdin -v error -i "$1" -vf scale=-2:540 \
     -c:v libx264 -crf 30 -c:a aac -b:a 96k "$W/clip.mp4" || exit 1
