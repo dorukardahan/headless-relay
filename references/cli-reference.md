@@ -9,7 +9,9 @@ then re-assessed 2026-07-15 after xAI open-sourced Grok Build (source audit of c
 `c68e39f`) — the whole-repo bundle is gone from source; the residuals are the two-root
 global-rule leak (Claude/Cursor compat from `$HOME` + grok's own `~/.grok/AGENTS.md`) and the
 unverifiable shipped binary, then re-verified 2026-08-14 on grok 1.0.3 (grok-4.6 became the CLI default 2026-08-12; all helper flags intact, live relay smoke green); Antigravity section verified
-2026-07-08 on agy 1.1.0 and refreshed 2026-09-21 on agy 1.1.1 (`agy models` listed Gemini 3.8 Flash as the current top Gemini Flash tier). Flags drift — re-check `--help` when a command errors with
+2026-07-08 on agy 1.1.0 and refreshed 2026-09-21 on agy 1.1.1 (`agy models` listed Gemini 3.8 Flash as the current top Gemini Flash tier). 2026-10-09 refresh: opencode 1.18.35, zcode CLI 0.16.9 (ZCode app 3.14.5), grok 1.0.50 and agy
+1.1.x re-checked, plus a new [Video understanding](#video-understanding-watching-a-clip) section
+(which lanes can actually watch a local clip). Flags drift — re-check `--help` when a command errors with
 `unexpected argument`.
 
 ## Contents
@@ -18,6 +20,7 @@ unverifiable shipped binary, then re-verified 2026-08-14 on grok 1.0.3 (grok-4.6
 - [GLM via ZCode — zcode --prompt](#glm-via-zcode--zcode---prompt)
 - [Grok — grok headless](#grok--grok-headless)
 - [Gemini via Antigravity — agy print mode](#gemini-via-antigravity--agy-print-mode)
+- [Video understanding (watching a clip)](#video-understanding-watching-a-clip)
 - [Claude — claude print mode](#claude--claude-print-mode)
 - [Output-format shapes and jq parsing](#output-format-shapes-and-jq-parsing)
 - [Full troubleshooting](#full-troubleshooting)
@@ -128,14 +131,35 @@ on the Coding Plan — `zai-coding-plan/glm-5.3` smoke-verified via `opencode ru
 Heads-up for API users: the new endpoint no longer allows disabling thinking (efforts are
 low/high/max only) — a breaking change for apps that ran with thinking off.
 
-Do not use `-f`/`--file` for prompt attachment in scripts — it has misbehaved on prior
-versions. Pipe on stdin instead. For repeated calls, start `opencode serve` once and attach:
-`opencode run --attach http://localhost:4096 "…"` avoids MCP cold-boot per call.
+Do not use `-f`/`--file` for prompt attachment in scripts. Pipe on stdin instead. Source-checked
+on 1.18.35 (`packages/opencode/src/cli/cmd/run.ts`): without `--attach`, `run -f` labels every file
+`text/plain`, so any binary file (image, PDF, video) fails with `Cannot read binary file`. Only
+`run --attach <opencode serve URL>` reads the file (≤10 MiB) and sends its detected MIME type. For
+repeated calls, start `opencode serve` once (it binds `127.0.0.1` by default and warns that it is
+unsecured without `OPENCODE_SERVER_PASSWORD`) and attach: `opencode run --attach
+http://127.0.0.1:4096 "…"` avoids MCP cold-boot per call. Video still does not reach GLM through
+this path, see [Video understanding](#video-understanding-watching-a-clip).
+
+**The desktop app does not update the CLI.** The OpenCode desktop app (`OpenCode.app`) and the
+headless CLI (`~/.opencode/bin/opencode`, installed by the official installer) are separate
+binaries; updating the app leaves an old CLI in place. Seen 2026-10-09 on macOS: a months-old CLI
+binary was killed at launch (`opencode --version` printed nothing, exit 137, crash reports
+`~/Library/Logs/DiagnosticReports/opencode-*.ips`, `codesign -v` → `invalid signature (code or
+signature have been modified)`), which looks like a silent hang. Fix: reinstall the CLI from the
+official release (`anomalyco/opencode`, formerly `sst/opencode`; the installer writes to
+`~/.opencode/bin`), e.g. `gh release download vX.Y.Z -R anomalyco/opencode -p
+opencode-darwin-arm64.zip`, compare the SHA-256 with the release asset digest, keep the old binary
+as a backup, then run the preflight (`opencode --version`, `opencode auth list`,
+`opencode models zai-coding-plan`). Verified 2026-10-09 on 1.18.35: the Z.AI Coding Plan catalog
+lists `glm-5.3`, `glm-5.3-flash`, `glm-5.3-highspeed`, `glm-5.2`, `glm-5.2-highspeed`, `glm-5.1`,
+`glm-5`, `glm-5-turbo`, `glm-4.7`, and `echo … | opencode run -m zai-coding-plan/glm-5.3 --variant
+max` answered.
 
 ## GLM via ZCode — zcode --prompt
 
 The ZCode desktop app (Z.ai's own GUI coding app) bundles a CLI. It is a first-class GLM path
-for users who do not have OpenCode. Status, verified live 2026-07-02 on app 3.2.2 / CLI 0.15.0:
+for users who do not have OpenCode. Status, verified live 2026-07-02 on app 3.2.2 / CLI 0.15.0,
+re-checked 2026-10-09 on app 3.14.5 / CLI 0.16.9:
 
 | Item | Status |
 |------|--------|
@@ -143,6 +167,8 @@ for users who do not have OpenCode. Status, verified live 2026-07-02 on app 3.2.
 | `zcode login` (OAuth) | BROKEN — `OAuth response is not valid JSON` (open bugs zai-org/feedback #51, #20) |
 | Official CLI / headless docs | None. Z.ai does not document the bundled CLI; non-interactive mode is open feature request #29. Treat this path as community-verified, may break on app updates |
 | API key for the free in-app tier | Not issued — free quota is app-locked. Paid Coding Plan users create a key at z.ai ("Individual Coding Plan" then "Plan Overview"). App users on any tier can bridge the app's own credential (recipe C) |
+| App 3.14.5 / CLI 0.16.9 packaging bug | Every call fails with `无法定位 CLI ZCode Built-in Provider Config：…/glm/provider/zcode-builtin.json, /config/provider/zcode-builtin.json` ("cannot locate the CLI ZCode built-in provider config"). The CLI looks for the file next to `zcode.cjs` (`glm/provider/`) or five levels up; the app ships it at `Contents/Resources/config/provider/`. Use the shim wrapper below. GLM-5.3 is exposed by this app version and the recipes below work on it |
+| Video via `--attach` | Does NOT reach the model (arrives as an empty placeholder, also with a config that declares video modality). See [Video understanding](#video-understanding-watching-a-clip) |
 
 The `zcode` command ships inside the app bundle. If it is not on PATH, add a wrapper (macOS
 example):
@@ -152,6 +178,34 @@ example):
 #!/bin/sh
 exec /Applications/ZCode.app/Contents/Resources/glm/zcode.cjs "$@"
 ```
+
+On app 3.14.5 the CLI cannot find its built-in provider file (table above). The CLI resolves
+the file relative to the script path it was started from (it does not follow the symlink), so a
+directory of symlinks fixes it without modifying the app. The wrapper falls back to the plain
+path once an app update ships the file where the CLI expects it:
+
+```sh
+# one-time shim (no app files are modified)
+G=/Applications/ZCode.app/Contents/Resources
+mkdir -p ~/.local/share/zcode-cli-shim && cd ~/.local/share/zcode-cli-shim
+ln -sfn "$G/glm/zcode.cjs" zcode.cjs
+ln -sfn "$G/glm/packages" packages
+ln -sfn "$G/config/provider" provider
+```
+
+```sh
+# ~/.local/bin/zcode  (chmod +x)
+#!/bin/sh
+SHIM="$HOME/.local/share/zcode-cli-shim"
+if [ -e /Applications/ZCode.app/Contents/Resources/glm/provider/zcode-builtin.json ] || [ ! -e "$SHIM/provider/zcode-builtin.json" ]; then
+  exec /Applications/ZCode.app/Contents/Resources/glm/zcode.cjs "$@"
+fi
+exec node "$SHIM/zcode.cjs" "$@"
+```
+
+Verified 2026-10-09: with the shim, `zcode --prompt "…" --mode plan --json` answers on
+`zai/glm-5.3` (the model reports itself as GLM-5.3). The CLI also reads `ZCODE_MODEL` for a
+one-off model override and `ZCODE_DATA_BASE_DIR` for an alternate config root.
 
 Do NOT `npm install zcode` or `zcode-cli` — unrelated 0.0.1 third-party stubs (supply-chain
 risk).
@@ -737,7 +791,98 @@ requirement.
 
 ### GLM / Claude
 
-No image or video generation in `opencode` / `zcode` / `claude -p`. Text only.
+No image or video generation in `opencode` / `zcode` / `claude -p`. Text only. (Watching a
+video is a different question: see the next section.)
+
+## Video understanding (watching a clip)
+
+Different from generation: the model is asked to *watch* a local clip (event footage, a demo
+recording) and describe it, transcribe it, pick a usable window, or flag brand risks. Live-tested
+2026-10-09 with the same prompt on the same 40-60 s phone clips (stage talk with speech and
+crowd laughter):
+
+| Lane | Watches a local clip headlessly? | What it actually receives |
+|------|----------------------------------|---------------------------|
+| Gemini via `agy` (`"Gemini 3.8 Flash (High)"`) | **YES** | About 1 frame per second **plus an automatic speech transcript**; not raw audio (music, applause and crowd noise are inferred, not heard). Timelines matched hand-checked frames within ~1 s (2026-10-05 test); transcripts are detailed enough to find candidate quotes, but re-check a quote before captioning it |
+| GLM-5.3-Flash (Z.ai Coding Plan) | **Frames only, and only via the API** | No speech at all: it says so honestly and cannot transcribe. Misread on-screen text once. Neither GLM CLI can pass the video (below) |
+| Grok 4.7 (`grok` 1.0.50) | **NO** | Nothing usable (below) |
+| GPT (Codex), Claude | Not tested in this pass | — |
+
+**Gemini recipe.** Put the clip alone in a freshly created private directory (re-encode 4K
+footage to ~540p first: smaller upload, same answer), make that directory the workspace, run it
+solo (the agy burst hang applies) and cap it with a timeout:
+
+```bash
+# fresh private workspace per clip: never reuse a shared dir (agy gets read access to all of it)
+watch_clip() (   # subshell: its own EXIT trap, so each clip's workspace is removed, also in a loop
+  W=$(mktemp -d "${TMPDIR:-/tmp}/watch.XXXXXX") && W=$(cd "$W" && pwd -P) || exit 1   # absolute, even if TMPDIR is relative
+  trap 'rm -rf "$W"' EXIT
+  ffmpeg -nostdin -v error -i "$1" -vf scale=-2:540 \
+    -c:v libx264 -crf 30 -c:a aac -b:a 96k "$W/clip.mp4" || exit 1
+  P=$(cat "$2") || exit 1   # read the prompt before cd; keep it out of the workspace
+  # macOS has no `timeout`; perl's alarm bounds the run (agy can hang)
+  cd "$W" && perl -e 'alarm shift; exec @ARGV' 300 \
+    agy -p "$P" --model "Gemini 3.8 Flash (High)" --add-dir "$W" --mode plan --sandbox </dev/null
+  rc=$?; exit "$rc"
+)
+watch_clip input.mp4 watch-prompt.md
+# many clips: while IFS= read -r f <&3; do watch_clip "$f" watch-prompt.md; done 3< clips.txt
+```
+
+`--mode plan --sandbox` keeps this analysis-only: print mode otherwise runs shell, file and
+network tools unprompted (see the notes above), and a clip or prompt can carry misleading
+instructions. Verified 2026-10-09: with both flags the clip was still watched and transcribed,
+while a request to create a file in the workspace was refused. Tell it to only read `clip.mp4`, not to search or create files, to mark unclear words as
+`[unclear]`, and to say so if it cannot hear audio. For many clips, call `watch_clip` in a loop
+fed on a separate descriptor (as shown), so ffmpeg and agy cannot consume the list. Keep the prompt to watching the clip: a prompt
+that also asks it to list the directory or use another tool can end with `jetski: no output
+produced — a tool required the "mcp" permission that headless mode cannot prompt for` (seen
+2026-10-09; the same recipe with a watch-only prompt answered). Keep `ffmpeg -nostdin` in any loop
+(ffmpeg otherwise eats the loop's stdin).
+
+**GLM: why the CLIs fail, and the path that works.**
+- `opencode` 1.18.35 lists `zai-coding-plan/glm-5.3-flash` with `input.video: true`
+  (`opencode models zai-coding-plan --verbose`), but cannot deliver it: plain `run -f clip.mp4`
+  fails with `Cannot read binary file` (every file is sent as `text/plain`), and `run --attach
+  <opencode serve>` sends `video/mp4` only for the `@ai-sdk/openai-compatible` provider to throw
+  `'file part media type video/mp4' functionality not supported`. `run` then **exits 0 with empty
+  output**; the error is visible only in `opencode serve --print-logs`.
+- `zcode` 0.16.9 `--attach clip.mp4` reaches the model as an empty placeholder, even with a config
+  that declares the model's video modality.
+- What works: the Coding Plan's OpenAI-compatible endpoint itself accepts a `video_url` part with a
+  base64 data URI. Keep the clip under 8 MB. Read the key inside the process; never put it on the
+  command line:
+
+```python
+import base64, json, os, urllib.request
+key = os.environ["ZAI_API_KEY"]            # your Coding Plan key, loaded by your own secret helper
+clip = base64.b64encode(open("clip.mp4", "rb").read()).decode()
+body = {"model": "glm-5.3-flash", "max_tokens": 8000, "messages": [{"role": "user", "content": [
+    {"type": "video_url", "video_url": {"url": "data:video/mp4;base64," + clip}},
+    {"type": "text", "text": open("watch-prompt.md").read()}]}]}
+req = urllib.request.Request("https://api.z.ai/api/coding/paas/v4/chat/completions",
+    data=json.dumps(body).encode(), method="POST",
+    headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"})
+print(json.load(urllib.request.urlopen(req, timeout=600))["choices"][0]["message"]["content"])
+```
+
+  A 40 s clip took ~25-70 s. Z.ai also ships a Vision MCP server (`video_analysis`, local or
+  remote clips up to 8 MB) for MCP-capable clients; it was not tested here.
+
+**Grok: no video input.** Source (`xai-org/grok-build` main `2bdd1d6`) and binary 1.0.50 agree:
+`read_file` lists `mp4`/`mov` as binary and skips them (`Cannot read binary file`), and the headless
+CLI forwards only Image blocks from `--prompt-json` / a `.json` `--prompt-file` (no video block;
+audio and resource blocks are dropped). A clip sent as an image block came back as "format wasn't
+recognized". Inline base64 in `--prompt-json` also hits the shell's argument-length limit; use a
+`.json` `--prompt-file` for large content blocks. Grok's video tools generate video, they do not
+read it.
+
+**Verify before acting on a model's flag.** In the same test a model misread a sponsor logo on a
+stage screen as an offensive word; a zoomed frame showed an ordinary brand name. Zoom into the
+frame yourself before treating a brand-safety flag as real, and do not caption a quote unless the
+transcript reproduces it word for word. Speaker identity is not stable either: two Gemini runs on
+the same clip named two different people (one of them a speaker who was not on stage), so take
+names from the on-screen lower third or your own check, never from the model alone.
 
 ## Claude — claude print mode
 
@@ -879,7 +1024,12 @@ structured output for the precise reason. When capturing a piped tool's exit thr
 | Grok: `Couldn't set model 'grok-build': Invalid params: "unknown model id"` | `grok-build` retired from the CLI at the grok-4.5 launch (2026-07-08) | Use an id listed for this account, e.g. `-m grok-4.7` only when `grok models` lists it |
 | Grok: `grok models` prints "You are not authenticated." though login should be fine | Header mirrors an expired cached access token read at process start; the same call then refreshes and fetches the catalog (routine after idle) | If a model list appears below the header → **available**, use the lane. Only "not authenticated" with NO model list is real: auth.json present → one bounded real call decides; auth.json absent → `grok login`. Match on `Available models:` / `Default model:`, not the header. `--yolo` / `--always-approve` are permission flags, never the fix |
 | Grok answer seems shallow | A lighter model (e.g. `grok-composer-2.5-fast`) was selected | Pin an id shown in this account's `grok models`; use `-m grok-4.7` only if explicitly listed |
-| OpenCode `-f` file attach errors | Known `-f` issue on some versions | Pipe the prompt on stdin instead |
+| OpenCode `-f` file attach errors / `Cannot read binary file` | Without `--attach`, `run -f` sends every file as `text/plain` | Pipe text prompts on stdin; for binary files run `opencode serve` and `run --attach http://127.0.0.1:<port>` (video still fails, see Video understanding) |
+| `opencode --version` / `run` prints nothing (looks hung), exit 137 | An old CLI binary in `~/.opencode/bin` killed at launch by macOS (`codesign -v` → invalid signature); updating the desktop app does not update the CLI | Reinstall the CLI from the official `anomalyco/opencode` release (check the SHA-256), then rerun the preflight |
+| `opencode run --attach … -f clip.mp4` exits 0 with no output | `@ai-sdk/openai-compatible` rejects video file parts; the error is only in `opencode serve --print-logs` | Use the Coding Plan API `video_url` path or Gemini (Video understanding section) |
+| zcode: `无法定位 CLI ZCode Built-in Provider Config：…` | ZCode app 3.14.5 / CLI 0.16.9 ships the provider file at `Resources/config/provider/`, the CLI looks in `glm/provider/` | Use the symlink shim wrapper in the ZCode section; no app files need changing |
+| zcode `--attach clip.mp4`: the model says nothing came through | The CLI does not forward video to the model | Use the Coding Plan API `video_url` path or Gemini |
+| Grok cannot "see" a video file | `read_file` skips `mp4`/`mov` as binary; only Image content blocks are forwarded | No Grok video input; use Gemini |
 | zcode: `Model config is missing. Create ~/.zcode/cli/config.json …` | No CLI config and no env vars | Apply Recipe A, B, or C above |
 | zcode config written but `model: Invalid input` in `~/.zcode/cli/log/` | `model.main` written as an object or bad ref | `model.main` must be a `provider/model` STRING, e.g. `"zai/glm-5.3"` |
 | `zcode login`: `OAuth response is not valid JSON` | Open Z.ai bug (feedback #51, #20) | Skip login; use Recipe A/B/C |
@@ -889,6 +1039,7 @@ structured output for the precise reason. When capturing a piped tool's exit thr
 | agy file operations land in `~/.gemini/antigravity-cli/scratch` | Antigravity's default working dir is its own scratch workspace, not your cwd | Pass `--add-dir /path/to/repo` (it becomes the working directory); use absolute paths in prompts |
 | agy: `flag needs an argument: -print` | stdin piping is not supported | Use `agy -p "$(cat file)"` — quoted command substitution passes the bytes verbatim |
 | agy modifies files you only wanted reviewed | Print mode runs tools unprompted (yolo-like) | Add `--mode plan` (advice-only) or `--sandbox` |
+| agy: `jetski: no output produced — a tool required the "mcp" permission …` | The prompt made agy reach for a tool that headless mode auto-denies (e.g. listing a directory) | Keep the prompt to the task (e.g. watch only `clip.mp4`) and rerun; do not reach for `--dangerously-skip-permissions` |
 | agy `-p` hangs forever inside a parallel multi-CLI burst | agy 1.1.0 timing/load bug when 3+ other model CLIs run concurrently (solo/pairwise reliable; stagger insufficient) | Run the Gemini lane sequentially around the burst; always cap agy with a timeout |
 | CLI missing or "not authenticated" | Not installed / logged out | Report it, skip that model; run `codex login` / `opencode auth login` / `grok login` as needed — do not substitute another model silently. Exception: Grok's "not authenticated" from `grok models` is not conclusive — walk the Grok availability ladder first |
 | Long run hangs the shell tool | Tool-level timeout | Set an explicit timeout, or run in background and poll |
