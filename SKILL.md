@@ -845,12 +845,20 @@ brand risks) is not the same as generating one. Live-tested 2026-10-09:
 | GPT (Codex), Claude | Not tested |
 
 ```bash
-# Gemini: clip alone in a fresh private dir (re-encode 4K to ~540p first), run solo, bounded
-W=$(mktemp -d "${TMPDIR:-/tmp}/watch.XXXXXX") && trap 'rm -rf "$W"' EXIT
-ffmpeg -nostdin -v error -i input.mp4 -vf scale=-2:540 -c:v libx264 -crf 30 -c:a aac "$W/clip.mp4"
-P=$(cat watch-prompt.md)   # read the prompt before cd; keep it out of the workspace
-( cd "$W" && perl -e 'alarm shift; exec @ARGV' 300 \
-    agy -p "$P" --model "Gemini 3.8 Flash (High)" --add-dir "$W" </dev/null )
+# Gemini: clip alone in a fresh private dir (re-encoded to ~540p), run solo, bounded
+watch_clip() (   # subshell: its own EXIT trap, so each clip's workspace is removed, also in a loop
+  W=$(mktemp -d "${TMPDIR:-/tmp}/watch.XXXXXX") || exit 1
+  trap 'rm -rf "$W"' EXIT
+  ffmpeg -nostdin -v error -i "$1" -vf scale=-2:540 \
+    -c:v libx264 -crf 30 -c:a aac -b:a 96k "$W/clip.mp4" || exit 1
+  P=$(cat "$2") || exit 1   # read the prompt before cd; keep it out of the workspace
+  # macOS has no `timeout`; perl's alarm bounds the run (agy can hang)
+  cd "$W" && perl -e 'alarm shift; exec @ARGV' 300 \
+    agy -p "$P" --model "Gemini 3.8 Flash (High)" --add-dir "$W" </dev/null
+  rc=$?; exit "$rc"
+)
+watch_clip input.mp4 watch-prompt.md
+# many clips: while IFS= read -r f <&3; do watch_clip "$f" watch-prompt.md; done 3< clips.txt
 ```
 
 The prompt should say: read only `clip.mp4`, no web search, no new files, timestamps, verbatim

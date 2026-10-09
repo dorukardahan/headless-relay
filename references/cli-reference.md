@@ -814,21 +814,28 @@ solo (the agy burst hang applies) and cap it with a timeout:
 
 ```bash
 # fresh private workspace per clip: never reuse a shared dir (agy gets read access to all of it)
-W=$(mktemp -d "${TMPDIR:-/tmp}/watch.XXXXXX") && trap 'rm -rf "$W"' EXIT
-ffmpeg -nostdin -v error -i input.mp4 -vf scale=-2:540 \
-  -c:v libx264 -crf 30 -c:a aac -b:a 96k "$W/clip.mp4"
-# macOS has no `timeout`; perl's alarm bounds the run (agy can hang)
-P=$(cat watch-prompt.md)   # read the prompt before cd; keep it out of the workspace
-( cd "$W" && perl -e 'alarm shift; exec @ARGV' 300 \
-    agy -p "$P" --model "Gemini 3.8 Flash (High)" --add-dir "$W" </dev/null )
+watch_clip() (   # subshell: its own EXIT trap, so each clip's workspace is removed, also in a loop
+  W=$(mktemp -d "${TMPDIR:-/tmp}/watch.XXXXXX") || exit 1
+  trap 'rm -rf "$W"' EXIT
+  ffmpeg -nostdin -v error -i "$1" -vf scale=-2:540 \
+    -c:v libx264 -crf 30 -c:a aac -b:a 96k "$W/clip.mp4" || exit 1
+  P=$(cat "$2") || exit 1   # read the prompt before cd; keep it out of the workspace
+  # macOS has no `timeout`; perl's alarm bounds the run (agy can hang)
+  cd "$W" && perl -e 'alarm shift; exec @ARGV' 300 \
+    agy -p "$P" --model "Gemini 3.8 Flash (High)" --add-dir "$W" </dev/null
+  rc=$?; exit "$rc"
+)
+watch_clip input.mp4 watch-prompt.md
+# many clips: while IFS= read -r f <&3; do watch_clip "$f" watch-prompt.md; done 3< clips.txt
 ```
 
 Tell it to only read `clip.mp4`, not to search or create files, to mark unclear words as
-`[unclear]`, and to say so if it cannot hear audio. Keep the prompt to watching the clip: a prompt
+`[unclear]`, and to say so if it cannot hear audio. For many clips, call `watch_clip` in a loop
+fed on a separate descriptor (as shown), so ffmpeg and agy cannot consume the list. Keep the prompt to watching the clip: a prompt
 that also asks it to list the directory or use another tool can end with `jetski: no output
 produced — a tool required the "mcp" permission that headless mode cannot prompt for` (seen
-2026-10-09; the same recipe with a watch-only prompt answered). In a `while read` loop over many clips,
-use `ffmpeg -nostdin` (ffmpeg otherwise eats the loop's stdin).
+2026-10-09; the same recipe with a watch-only prompt answered). Keep `ffmpeg -nostdin` in any loop
+(ffmpeg otherwise eats the loop's stdin).
 
 **GLM: why the CLIs fail, and the path that works.**
 - `opencode` 1.18.35 lists `zai-coding-plan/glm-5.3-flash` with `input.video: true`
@@ -870,7 +877,9 @@ read it.
 **Verify before acting on a model's flag.** In the same test a model misread a sponsor logo on a
 stage screen as an offensive word; a zoomed frame showed an ordinary brand name. Zoom into the
 frame yourself before treating a brand-safety flag as real, and do not caption a quote unless the
-transcript reproduces it word for word.
+transcript reproduces it word for word. Speaker identity is not stable either: two Gemini runs on
+the same clip named two different people (one of them a speaker who was not on stage), so take
+names from the on-screen lower third or your own check, never from the model alone.
 
 ## Claude — claude print mode
 
