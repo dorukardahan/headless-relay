@@ -52,6 +52,8 @@ is a single `git clone`; everything else on this page is detail for when you nee
   `env -i` + empty HOME + clean temp GROK_HOME, only the four media tools allowed, media published
   atomically); Grok is
   the only lane that also does video. The skill documents each CLI's quirks
+- **Video understanding**: which lane can actually *watch* a local clip (Gemini via agy: frames plus
+  a speech transcript; GLM-5.3-Flash: frames only, via the Coding Plan API; Grok: no), with recipes
 - **Scripting**: JSON output parsing and session resume for multi-turn work
 - **Safety rails**: a preflight gate (installed + logged in?), a provider-terms compliance gate
   for non-native harnesses, and a **hardened, tool-restricted helper for Grok (hermetic `env -i` + empty
@@ -176,3 +178,12 @@ new-generation CLI catalog. Anthropic's `claude-opus-5-5` (released 2026-09-22) 
 Claude Code **2.1.280+**. An installed 2.1.260 rejects it with HTTP 400, so do not assume
 `--model` means the requested model actually ran: verify `modelUsage` in the CLI's JSON result.
 Neither the local Claude Code installation nor subscription auth is changed by this docs update.
+
+2026-10-09 update: a live test of video understanding on the same phone clips. Gemini 3.8 Flash
+through `agy` watched them (about one frame per second plus a speech transcript); GLM-5.3-Flash
+saw frames but no speech, and only through the Coding Plan API's `video_url` part, because
+`opencode` 1.18.35 (its provider rejects video parts, and `run` exits 0 with empty output) and
+`zcode` 0.16.9 (`--attach` forwards an empty placeholder) cannot pass the clip; Grok 4.7 on grok
+1.0.50 cannot read video at all. Two CLI fixes were recorded: the OpenCode desktop app does not
+update the headless CLI (an old CLI was killed at launch by macOS, which looked like a hang), and
+ZCode app 3.14.5 needs a small symlink shim before its bundled CLI finds its provider config.

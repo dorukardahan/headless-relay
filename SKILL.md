@@ -1,6 +1,6 @@
 ---
 name: headless-relay
-description: Headless handoff guide for running other AI models from inside an agent session (any Agent Skills runtime - Claude Code, Codex, Grok Build, Cursor, OpenClaw, Hermes). Covers GPT (codex exec), GLM (opencode run or zcode --prompt), Grok (grok -p), Gemini (Antigravity agy -p), and Claude (claude -p or a subagent) - inline vs file prompts, parallel multi-model consensus, JSON output, session resume, image/video generation, provider-terms compliance. Use for "ask codex", "ask GLM", "ask grok", "ask gemini", "second opinion", "cross-model review", "generate an image", "run headless", "ask another model".
+description: Headless handoff guide for running other AI models from inside an agent session (any Agent Skills runtime - Claude Code, Codex, Grok Build, Cursor, OpenClaw, Hermes). Covers GPT (codex exec), GLM (opencode run or zcode --prompt), Grok (grok -p), Gemini (Antigravity agy -p), and Claude (claude -p or a subagent) - inline vs file prompts, parallel multi-model consensus, JSON output, session resume, image/video generation, video understanding (watching a clip), provider-terms compliance. Use for "ask codex", "ask GLM", "ask grok", "ask gemini", "second opinion", "cross-model review", "generate an image", "watch this video", "run headless", "ask another model".
 license: MIT. Complete terms in LICENSE.txt
 metadata: {"version": "3.1.1"}
 ---
@@ -511,8 +511,8 @@ substitute a different model to fill the gap.
 | Model | Binary check | Auth / plan check |
 |-------|--------------|-------------------|
 | GPT (Codex) | `command -v codex` | fails fast with an auth error when logged out (`codex login`). Pin only an id listed by this account's `codex debug models` JSON catalog (`gpt-6-sol`, `gpt-6-luna`, or `gpt-6-astra` when enrolled); otherwise keep `-c model="gpt-5.6-sol"` if it is listed. Do not run `codex models` — on 0.144 that starts an interactive prompt. |
-| GLM via OpenCode | `command -v opencode` | `opencode auth list` shows a Z.AI credential |
-| GLM via ZCode | `command -v zcode` (add a PATH wrapper if only the app is installed) | `~/.zcode/cli/config.json` exists or `ZCODE_API_KEY` is set. `zcode login` is currently broken — see [references/cli-reference.md](references/cli-reference.md) |
+| GLM via OpenCode | `command -v opencode` AND `opencode --version` prints a version (an old CLI binary can be killed silently by macOS; the desktop app does not update it — see [references/cli-reference.md](references/cli-reference.md)) | `opencode auth list` shows a Z.AI credential |
+| GLM via ZCode | `command -v zcode` (add a PATH wrapper if only the app is installed) | `~/.zcode/cli/config.json` exists or `ZCODE_API_KEY` is set. `zcode login` is currently broken, and app 3.14.5 needs a small symlink shim before any call works (error `无法定位 CLI ZCode Built-in Provider Config`, "cannot locate the built-in provider config") — see [references/cli-reference.md](references/cli-reference.md) |
 | Grok | `command -v grok` | Run `grok models` (catalog fetch, no model turn). A model list proves the CLI authenticated, even with a stale "not authenticated" header, but it does **not** prove `grok-4.7` access: require an exact `grok-4.7` entry under `Available models:` before setting `GROK_RELAY_MODEL=grok-4.7` for either helper. Otherwise retain the 4.6 default only if the list has `grok-4.6`, or set `GROK_RELAY_MODEL=grok-4.5` if only 4.5 is listed. If none is listed, skip the Grok lane; never guess a pin. With no model list, follow [the auth ladder](references/cli-reference.md). |
 | Gemini via Antigravity | `command -v agy` | `agy models` lists the model menu when logged in; the default model comes from the user's Antigravity config |
 | Claude | `command -v claude`; `claude --version` | `claude-opus-5-5` requires Claude Code 2.1.280+; 2.1.260 returns HTTP 400. Confirm signed-in status on the intended profile and the actual `modelUsage` id after a bounded run. Keep the compliance gate below. |
@@ -832,6 +832,30 @@ Per-target support (detail in [references/cli-reference.md](references/cli-refer
 | Grok | YES — `image_gen` / `image_edit` / `image_to_video` / `reference_to_video`, Imagine backend; the ONLY lane with video. Run via **`grok_media`** (hermetic `env -i` + empty HOME + clean temp GROK_HOME; allow-lists ONLY the 4 media tools with `--tools` — `--deny '*'` would block image_gen — binary-observed on 0.2.101). grok runs in an empty non-git dir; image_gen writes under the temp GROK_HOME, and the helper publishes the artifact into your output dir by copying it to a temp there and atomically hard-linking it to a free name (no-clobber, no-follow; a no-hardlink fs and newline-in-name both **fail closed**; rolls back only this call's own files on failure and never removes the output dir). The answer/manifest live in a separate control base grok is never given a path to |
 | GLM / Claude | No headless image generation in these CLIs |
 
+### Scenario I — watch a video (video understanding)
+
+Asking a model to *watch* a local clip (describe it, transcribe it, pick a usable window, flag
+brand risks) is not the same as generating one. Live-tested 2026-10-09:
+
+| Target | Can it watch a local clip headlessly? |
+|--------|---------------------------------------|
+| Gemini (agy, `"Gemini 3.8 Flash (High)"`) | **YES** — ~1 frame/s plus an automatic speech transcript (no raw audio). The lane to use for talks, interviews, jokes, quotes |
+| GLM-5.3-Flash | **Frames only, no speech**, and only through the Coding Plan API's `video_url` part. `opencode` lists the model as video-capable but its provider rejects video (and `run` exits 0 with empty output); `zcode --attach` forwards an empty placeholder |
+| Grok 4.7 | **NO** — `read_file` skips video as binary and the headless CLI forwards only image blocks |
+| GPT (Codex), Claude | Not tested |
+
+```bash
+# Gemini: clip alone in an empty dir (re-encode 4K to ~540p first), run solo, cap with a timeout
+cd /tmp/watch && agy -p "$(cat /tmp/watch-prompt.md)" --model "Gemini 3.8 Flash (High)" \
+  --add-dir /tmp/watch </dev/null
+```
+
+The prompt should say: read only `clip.mp4`, no web search, no new files, timestamps, verbatim
+speech with `[unclear]` for unclear words, say plainly if audio is unavailable. Zoom into the frame
+yourself before acting on a model's brand-safety flag (a sponsor logo was misread as an offensive
+word in testing). GLM API recipe, the CLI failure details and the Grok source evidence:
+[references/cli-reference.md](references/cli-reference.md), "Video understanding".
+
 ## Claude target: subprocess vs in-session subagent
 
 First clear the compliance gate above — both methods below are off-limits when a non-Anthropic
@@ -868,7 +892,7 @@ while a same-provider second opinion should stay in-session as a subagent.
 | File | Contents |
 |------|----------|
 | [SECURITY.md](SECURITY.md) | **Grok data egress**: the historical whole-repo upload, xAI's 2026-07-15 open-sourcing + the source audit, the residual concerns (global-rule leak, unverifiable binary), and per-user hardening / migration for people who already ran Grok |
-| [references/cli-reference.md](references/cli-reference.md) | Full per-CLI flag tables, model ids, ZCode setup recipes, output-format shapes, session resume, sandbox/network detail, the Grok data-egress detail, troubleshooting |
+| [references/cli-reference.md](references/cli-reference.md) | Full per-CLI flag tables, model ids, ZCode setup recipes (incl. the app 3.14.5 shim), output-format shapes, session resume, sandbox/network detail, the Grok data-egress detail, video understanding (which lanes can watch a clip), troubleshooting |
 | [scripts/print-model-catalog.sh](scripts/print-model-catalog.sh) | Machine-local catalog snapshot (`codex debug models` / `agy models` / `grok models`). Not a published menu. |
 | [references/anthropic-terms.md](references/anthropic-terms.md) | Compliance detail: Anthropic subscription-routing block, Commercial Terms D.4, Fable 5 safeguards, enforcement history, plus the OpenAI / xAI / Z.ai / Google provider-terms matrix, with citations |
 | [references/reprompter-relay.md](references/reprompter-relay.md) | Pairing recipe: run a prompt-engineering skill (e.g. RePrompter) before relaying a nontrivial task; documents the RePrompter handoff contract |
@@ -894,7 +918,10 @@ while a same-provider second opinion should stay in-session as a subagent.
 | Grok: `Couldn't set model 'grok-build': … "unknown model id"` | `grok-build` was retired from the CLI when grok-4.5 launched (July 2026) — use a current id listed by this account's `grok models`; `-m grok-4.7` is valid only if it appears there |
 | zcode: `Model config is missing. Create ~/.zcode/cli/config.json …` | One-time setup — follow the ZCode recipes in [references/cli-reference.md](references/cli-reference.md) |
 | `zcode login`: `OAuth response is not valid JSON` | Known open bug — skip login entirely; use the config-file or env-var recipe instead |
-| OpenCode `-f` file attach errors | Pipe via stdin instead (`cat file \| opencode run …`) |
+| OpenCode `-f` file attach errors (`Cannot read binary file`) | Without `--attach`, `run -f` sends every file as text. Pipe text prompts on stdin (`cat file \| opencode run …`); binary attachments need `opencode serve` + `run --attach` |
+| `opencode --version` / `run` prints nothing, exit 137 | Old CLI binary killed by macOS (invalid signature); the desktop app does not update the CLI — reinstall it from the official release (see [references/cli-reference.md](references/cli-reference.md)) |
+| zcode: `无法定位 CLI ZCode Built-in Provider Config` | ZCode app 3.14.5 packaging bug — add the symlink shim wrapper from [references/cli-reference.md](references/cli-reference.md) |
+| A model "watched" a video but describes nothing / says no frames arrived | That lane cannot take video (Grok, GLM through opencode/zcode) — use Gemini via agy, or GLM via the Coding Plan API (frames only); see Scenario I |
 | agy reads/writes files in `~/.gemini/antigravity-cli/scratch` instead of your repo | Antigravity's default working dir is its own scratch workspace — pass `--add-dir /path/to/repo` (it becomes the working directory) |
 | agy: `flag needs an argument: -print` | No stdin pipe — use `agy -p "$(cat /tmp/handoff.md)"` |
 | agy `-p` never returns when launched inside a parallel multi-CLI burst | Known agy 1.1.0 timing bug (solo/pairwise runs are reliable) — run the Gemini lane sequentially around the burst, and always cap it with a timeout |
