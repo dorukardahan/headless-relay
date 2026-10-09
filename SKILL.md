@@ -864,7 +864,8 @@ watch_clip input.mp4 watch-prompt.md
 The prompt should say: read only `clip.mp4`, no web search, no new files, timestamps, verbatim
 speech with `[unclear]` for unclear words, say plainly if audio is unavailable. Zoom into the frame
 yourself before acting on a model's brand-safety flag (a sponsor logo was misread as an offensive
-word in testing). GLM API recipe, the CLI failure details and the Grok source evidence:
+word in testing), and take speaker names from the on-screen lower third, not from the model (two
+runs on one clip named two different people). GLM API recipe, the CLI failure details and the Grok source evidence:
 [references/cli-reference.md](references/cli-reference.md), "Video understanding".
 
 ## Claude target: subprocess vs in-session subagent
