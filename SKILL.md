@@ -854,7 +854,7 @@ watch_clip() (   # subshell: its own EXIT trap, so each clip's workspace is remo
   P=$(cat "$2") || exit 1   # read the prompt before cd; keep it out of the workspace
   # macOS has no `timeout`; perl's alarm bounds the run (agy can hang)
   cd "$W" && perl -e 'alarm shift; exec @ARGV' 300 \
-    agy -p "$P" --model "Gemini 3.8 Flash (High)" --add-dir "$W" </dev/null
+    agy -p "$P" --model "Gemini 3.8 Flash (High)" --add-dir "$W" --mode plan --sandbox </dev/null
   rc=$?; exit "$rc"
 )
 watch_clip input.mp4 watch-prompt.md

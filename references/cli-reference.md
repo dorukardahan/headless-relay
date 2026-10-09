@@ -822,14 +822,17 @@ watch_clip() (   # subshell: its own EXIT trap, so each clip's workspace is remo
   P=$(cat "$2") || exit 1   # read the prompt before cd; keep it out of the workspace
   # macOS has no `timeout`; perl's alarm bounds the run (agy can hang)
   cd "$W" && perl -e 'alarm shift; exec @ARGV' 300 \
-    agy -p "$P" --model "Gemini 3.8 Flash (High)" --add-dir "$W" </dev/null
+    agy -p "$P" --model "Gemini 3.8 Flash (High)" --add-dir "$W" --mode plan --sandbox </dev/null
   rc=$?; exit "$rc"
 )
 watch_clip input.mp4 watch-prompt.md
 # many clips: while IFS= read -r f <&3; do watch_clip "$f" watch-prompt.md; done 3< clips.txt
 ```
 
-Tell it to only read `clip.mp4`, not to search or create files, to mark unclear words as
+`--mode plan --sandbox` keeps this analysis-only: print mode otherwise runs shell, file and
+network tools unprompted (see the notes above), and a clip or prompt can carry misleading
+instructions. Verified 2026-10-09: with both flags the clip was still watched and transcribed,
+while a request to create a file in the workspace was refused. Tell it to only read `clip.mp4`, not to search or create files, to mark unclear words as
 `[unclear]`, and to say so if it cannot hear audio. For many clips, call `watch_clip` in a loop
 fed on a separate descriptor (as shown), so ffmpeg and agy cannot consume the list. Keep the prompt to watching the clip: a prompt
 that also asks it to list the directory or use another tool can end with `jetski: no output
