@@ -460,8 +460,8 @@ at the time. **The 2026-07-15 source audit above supersedes this finding**: the 
 gone from source, not merely server-suppressed. Codex, GLM (opencode), and Gemini (agy) sent no
 whole-repo bundle in the same test.
 
-**Two residuals remain**, and the `grok_relay` / `grok_media` helpers in `SKILL.md` still guard
-both:
+**Historical audit concerns and continuing defenses.** The `grok_relay` / `grok_media`
+helpers in `SKILL.md` retain their controls; see the dated recheck below:
 
 1. **Global-rule leak (two roots).** Grok auto-loads global rules into every turn. (a) A
    Claude-Code/Cursor compatibility scan — every `[compat.*]` cell defaults `true` in source — reads
@@ -469,11 +469,16 @@ both:
    `$HOME`. (b) grok's OWN `~/.grok/AGENTS.md` / skills / hooks / MCP, rooted at `$GROK_HOME`
    (`agents_md.rs` always scans `grok_home()`). Either way the text is injected into the model turn,
    which then goes to xAI (observed with canary files on 0.2.99/0.2.101; §4 of [../SECURITY.md](../SECURITY.md)).
-2. **Unverifiable binary.** The shipped binary can't be verified against the audited source: no
-   GitHub releases or signatures, no reproducible build, the installer pulls from a different
-   private repo, auto-update `exec()`s unsigned bytes, and a local `cargo build` reports a
-   version matching no release. This is a general caveat for **any** closed-binary relay target
-   (Codex, agy included), not unique to Grok.
+2. **Source/binary evidence limit.** The July audit did not prove installed-binary
+   parity with published source. A targeted 2026-10-13 recheck found the current
+   installer uses x.ai and a public GCS fallback; the old private release-repository
+   description is obsolete. Public availability alone does not prove reproducibility.
+   This is a general CLI provenance concern, not evidence of a current repo upload.
+
+These July observations are historical. The dated current-evidence section in
+[../SECURITY.md](../SECURITY.md) records the limited source/docs recheck, including
+still-default Claude/Cursor scans and Codex's reserved non-session cells; it is not
+new wire-level verification of the installed Grok binary.
 
 Grok remains a **cloud model** either way — the prompt and Grok's reasoning go to xAI, open-source
 client or not.

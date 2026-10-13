@@ -110,32 +110,29 @@ default. A source audit of that release (commit `c68e39f`) found:
 - **Your local `~/.grok/config.toml` beats xAI's remote settings** (proven by the resolver plus a
   repo test): a server-pushed flag cannot re-enable an upload you turned off locally.
 
-**Two residual concerns remain — the relay still uses a small helper for them:**
+**Why the relay keeps its controls.** A targeted recheck on 2026-10-13 found that
+Claude/Cursor compatibility scans remain on by default in the official settings
+reference and source snapshot `2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8`.
+The defaults now live in `xai-grok-config/src/compat.rs`; Codex non-session cells
+are reserved rather than discovery surfaces. Grok's own global instructions still
+load from `GROK_HOME`. The helper keeps an **empty synthetic `HOME`**, a clean
+temporary `GROK_HOME`, disabled compatibility cells and a hermetic child environment
+to reduce unintended context. These controls are not a full OS filesystem sandbox.
 
-1. **Grok auto-loads global rules into every turn — from two roots.** (a) As a Claude-Code / Cursor /
-   Codex *compatibility* feature (on by default — source-confirmed in `xai-grok-tools`
-   `types/compat.rs`: `CompatConfig` defaults every cell ON for all three vendors), `grok` scans
-   `~/.claude/CLAUDE.md`, `~/.cursor/…`, `~/.claude.json` MCP servers, skills, and hooks — all rooted
-   at `$HOME` (Codex's `sessions` cell is the one runtime-consumed Codex surface). (b) Independently,
-   `grok` reads its OWN `~/.grok/AGENTS.md` / skills / hooks / MCP, rooted at `$GROK_HOME`
-   (source-verified: the loader always scans `grok_home()`). Either way that text is injected into the
-   model turn and goes to xAI like any prompt — your setup leaving for xAI without you asking. The
-   helper closes both: an **empty synthetic `HOME`** (nothing at `$HOME` to scan) **and a clean
-   temporary `GROK_HOME`** (nothing at `$GROK_HOME` to scan), and belt-and-suspenders it pins every
-   `[compat.claude]` / `[compat.cursor]` / `[compat.codex]` cell `false` in the temp `GROK_HOME`'s
-   `config.toml` while the hermetic env drops the `GROK_<VENDOR>_*_ENABLED` overrides that would
-   otherwise outrank that config.
-2. **The shipped binary can't be verified against the source.** No GitHub releases / signatures /
-   reproducible build; the official installer pulls from a *different* (private) repo; auto-update
-   `exec()`s unsigned bytes; a `cargo build` reports a version matching no release. So "the source is
-   clean" does not prove "the binary you run is clean." This is a general caveat for **any**
-   closed-binary relay target (Codex and agy included), not unique to Grok — but it is why the helper
-   keeps cheap belt-and-suspenders (empty non-git working dir + locked-down tool use) rather than trusting the
-   binary.
+The current installer downloads from x.ai with a public GCS fallback, not the old
+private release-repository channel. This recheck did not establish installed-binary
+parity with the source; that is an evidence limit shared with other CLI targets,
+not proof of present-day whole-repo uploads. The July findings above are historical;
+see [SECURITY.md](SECURITY.md) for dated sources and scope.
 
-Grok is still a **cloud model**: the prompt you pass and Grok's reasoning go to xAI. The helper stops
-the global-rule leak and denies tools; it does not make Grok local, and it does not route
-repo/diff context to Grok (relay only the prompt you give it).
+The hosted Grok lane is a **cloud model**: supplied prompt/context goes to xAI.
+The helpers do not make it local or guarantee provider retention. They launch from
+an empty non-git working directory, but do not guarantee zero repository access:
+subscription auth grants read/write on the credential's whole parent directory,
+including any source files beside it. Use a dedicated credential directory outside
+all repository trees, containing only auth material; the helper does not enforce
+that recommendation for every ancestor or directory member. Relay only the explicitly
+allowed brief.
 
 **Two helper functions — define once, use for every Grok call.** Each is a subshell (`name() ( … )`)
 with `set +eux` (never inherits the caller's errexit/nounset, and disables xtrace so a key can't be

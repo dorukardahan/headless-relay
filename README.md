@@ -14,35 +14,21 @@ Six model lanes ship ready to use (GPT, GLM, Kimi K3, Grok, Gemini, Claude), and
 own, including local models running through Ollama, LM Studio, or Apple MLX. Installation
 is a single `git clone`; everything else on this page is detail for when you need it.
 
-> ### ⚠️ Security: the Grok lane and your repository
->
-> Earlier shipped versions of the xAI Grok Build CLI, run inside a git repository, uploaded
-> your **entire repo: full git history and all tracked files, including a tracked `.env`** to
-> xAI cloud storage, regardless of which files the model reads — confirmed by xAI's own Grok
-> account on X and by independent wire capture. On 2026-07-15 xAI open-sourced Grok Build
-> (Apache-2.0), deleted previously-retained coding data, and set retention off by default. A
-> source audit of the released code (commit `c68e39f`) found the whole-repo bundle path is
-> **gone** from source, the remaining trace-upload pipeline (the model's own turn I/O) defaults
-> **off**, and your local `~/.grok/config.toml` beats xAI's remote settings — xAI cannot
-> remotely re-enable an upload you've turned off locally. Two residuals remain, and this skill
-> still guards both: Grok auto-loads global rules into every turn — your other tools' config (a
-> Claude-Code/Cursor/Codex compatibility scan of `~/.claude` / `~/.cursor` / `~/.codex`, rooted at
-> `$HOME`) AND grok's own `~/.grok/AGENTS.md` (rooted at `$GROK_HOME`) — and the shipped binary can't
-> be verified against the source (no signed releases or reproducible build), true of any closed-binary
-> relay target, not unique to Grok. So `grok_relay` / `grok_media` still run Grok under a **hermetic
-> `env -i` child environment** (an allowlist — only a handful of vars reach grok, dropping your other
-> secrets and grok's own endpoint / auth-provider-command / log / compat overrides) with an empty
-> synthetic `HOME` AND a clean temporary `GROK_HOME` (your real login reached out-of-band via
-> `GROK_AUTH_PATH`, or `XAI_API_KEY`), in an empty non-git directory (verified outside any git tree),
-> with its tool use locked down and a real watchdog timeout. One thing to know if you use a
-> subscription login: grok 1.0.x's sandbox is kernel-enforced and would block grok from reading your
-> `auth.json`, so the helper ships a seatbelt profile granting read/write on **the directory holding that
-> credential, and nothing else** — bounded so it can never be `/`, your home directory, a git repository,
-> or anything that is not the credential's own directory. Point `GROK_AUTH_PATH` at a dedicated directory
-> and that grant covers nothing but the token. Scope is personal / consumer auth —
-> team/enterprise managed-policy parity is unverified. None of this makes Grok local
-> — it is still a cloud model; the prompt and Grok's reasoning go to xAI. For the full history, the
-> audit, and what to do if you already used Grok Build in a real repo, read **[SECURITY.md](SECURITY.md)**.
+## Security and privacy
+
+The hosted model lanes send the brief and any supplied context to their provider;
+only a separately configured local target can keep inference on your machine.
+For Grok, use `grok_relay` / `grok_media`: they limit inherited environment and
+local context with an empty synthetic `HOME`, a clean temporary `GROK_HOME`, a
+non-git working directory, restricted tools and a watchdog. This is defense in
+depth, **not a full OS sandbox** or a guarantee about provider-side retention.
+Subscription auth grants read/write access to the credential's whole parent directory;
+use a dedicated auth-only directory outside repository trees. This is a recommendation,
+not a complete enforced repository-access boundary. Personal/consumer auth is supported;
+team/enterprise managed-policy parity is unverified.
+[Historical Grok Build repo-upload evidence, dated audits and hardening details](SECURITY.md)
+are separate from today's model-turn traffic; the old incident is not a claim
+that current Grok versions automatically upload your entire repository.
 
 ## What it can do
 
