@@ -938,7 +938,7 @@ directory, print the path, then read it back. agy 1.3.x is the exception: it use
 its own conversation folder (see the agy block below).
 
 Codex and agy do NOT bundle the repo (wire-verified). Codex writes straight into your output
-directory; agy 1.3.x writes into its own conversation folder, and `agy_image` copies the file out:
+directory; agy 1.3.x writes into its own conversation folder, and `agy_image` copies the file out without overwriting anything:
 
 ```bash
 # GPT (Codex): built-in image_gen. Two reliability rules (see reference for the why):
@@ -959,10 +959,12 @@ perl -e 'alarm shift; exec @ARGV' 480 \
 # too). The Google-account login covers it: no API key, no OpenRouter. Verified 2026-10-14 on
 # agy 1.3.4 (details in references/cli-reference.md).
 # agy 1.3.x: images come from the built-in image-generator subagent and land in agy's own
-# conversation folder; copy one out only if the reported path is inside THIS run's folder
-agy_image() (   # usage: agy_image "description" OUTPUT-DIR   (exit 3 = no image)
+# conversation folder; copy one out only if the reported path is inside THIS run's folder,
+# and never over an existing file (exit 4 if the name is taken)
+agy_image() (   # usage: agy_image "description" OUTPUT-DIR   (exit 3 = no image, 4 = not saved: name taken)
+  [ -d "$2" ] || { echo "agy_image: OUTPUT-DIR is not a directory: $2" >&2; exit 2; }
   W=$(mktemp -d "${TMPDIR:-/tmp}/agyimg.XXXXXX") && W=$(cd "$W" && pwd -P) || exit 1
-  trap 'rm -rf "$W"' EXIT
+  tmp=""; trap 'rm -rf "$W"; [ -z "$tmp" ] || rm -f "$tmp"' EXIT
   out=$(cd "$W" && perl -e 'alarm shift; exec @ARGV' 600 \
     agy -p "Use your image-generator subagent now to generate $1. Do not call MCP or memory tools, and do not run shell commands. When done, print exactly: SAVED: <absolute path>." \
     --model "Gemini 3.8 Flash (High)" --output-format json </dev/null)
@@ -975,7 +977,16 @@ agy_image() (   # usage: agy_image "description" OUTPUT-DIR   (exit 3 = no image
     *) echo "agy_image: path is outside this run's folder: $src" >&2; exit 3 ;;
   esac
   { [ -n "$cid" ] && [ -f "$src" ] && [ ! -L "$src" ]; } || { echo "agy_image: file missing" >&2; exit 3; }
-  cp "$src" "$2"/ && printf '%s\n' "$2/${src##*/}"
+  # never overwrite: copy to a temp name in OUTPUT-DIR, then hard-link it to the final name.
+  # ln fails if that name already exists (also a symlink) and does not follow it.
+  dst="$2/${src##*/}"
+  tmp=$(mktemp "$2/.agyimg.XXXXXX") || exit 1
+  cp "$src" "$tmp" && chmod 644 "$tmp" || exit 1
+  if ln "$tmp" "$dst" 2>/dev/null; then printf '%s\n' "$dst"; exit 0; fi
+  if [ -e "$dst" ] || [ -L "$dst" ]; then
+    echo "agy_image: $dst already exists; not overwriting (the image is still at $src)" >&2; exit 4
+  fi
+  echo "agy_image: could not hard-link into $2 (filesystem without hard links?); the image is still at $src" >&2; exit 1
 )
 agy_image "a simple green square on a white background" /path/to/output-dir
 ```
@@ -1005,7 +1016,7 @@ Per-target support (detail in [references/cli-reference.md](references/cli-refer
 | Target | Headless media generation |
 |--------|---------------------------|
 | GPT (Codex) | YES — built-in `image_gen` via `codex exec`; avoid `ultra` (auto-delegation spiral, `max` works in ~55s), close stdin (`</dev/null`), direct "call the tool now" prompt (verified: blue-circle + green-square PNGs). No whole-repo bundle (still a cloud image API) |
-| Gemini (agy) | YES (image only) — agy 1.3.x: built-in `image-generator` subagent through `agy_image`; the 1.1.0 `generate_image` prompt now ends empty. No API key / no OpenRouter (Google login covers it), ~80 s. The file lands in `~/.gemini/antigravity-cli/brain/<conversation_id>/` and `agy_image` copies it out after a path check (verified 2026-10-14 on 1.3.4: 1024×1024 JPEGs). Run SOLO — the agy parallel-burst hang applies. No native video tool. No whole-repo bundle (still a cloud image API) |
+| Gemini (agy) | YES (image only) — agy 1.3.x: built-in `image-generator` subagent through `agy_image`; the 1.1.0 `generate_image` prompt now ends empty. No API key / no OpenRouter (Google login covers it), ~80 s. The file lands in `~/.gemini/antigravity-cli/brain/<conversation_id>/` and `agy_image` copies it out after a path check and never overwrites an existing file (verified 2026-10-14 on 1.3.4: 1024×1024 JPEGs). Run SOLO — the agy parallel-burst hang applies. No native video tool. No whole-repo bundle (still a cloud image API) |
 | Grok | YES — `image_gen` / `image_edit` / `image_to_video` / `reference_to_video`, Imagine backend; the ONLY lane with video. Run via **`grok_media`** (hermetic `env -i` + empty HOME + clean temp GROK_HOME; allow-lists ONLY the 4 media tools with `--tools` — `--deny '*'` would block image_gen — binary-observed on 0.2.101). grok runs in an empty non-git dir; image_gen writes under the temp GROK_HOME, and the helper publishes the artifact into your output dir by copying it to a temp there and atomically hard-linking it to a free name (no-clobber, no-follow; a no-hardlink fs and newline-in-name both **fail closed**; rolls back only this call's own files on failure and never removes the output dir). The answer/manifest live in a separate control base grok is never given a path to |
 | GLM / Kimi / Claude | No headless image generation in these CLIs |
 

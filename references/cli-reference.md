@@ -944,10 +944,12 @@ itself was allowed. The prompt below rules that out.
 
 ```bash
 # agy 1.3.x: images come from the built-in image-generator subagent and land in agy's own
-# conversation folder; copy one out only if the reported path is inside THIS run's folder
-agy_image() (   # usage: agy_image "description" OUTPUT-DIR   (exit 3 = no image)
+# conversation folder; copy one out only if the reported path is inside THIS run's folder,
+# and never over an existing file (exit 4 if the name is taken)
+agy_image() (   # usage: agy_image "description" OUTPUT-DIR   (exit 3 = no image, 4 = not saved: name taken)
+  [ -d "$2" ] || { echo "agy_image: OUTPUT-DIR is not a directory: $2" >&2; exit 2; }
   W=$(mktemp -d "${TMPDIR:-/tmp}/agyimg.XXXXXX") && W=$(cd "$W" && pwd -P) || exit 1
-  trap 'rm -rf "$W"' EXIT
+  tmp=""; trap 'rm -rf "$W"; [ -z "$tmp" ] || rm -f "$tmp"' EXIT
   out=$(cd "$W" && perl -e 'alarm shift; exec @ARGV' 600 \
     agy -p "Use your image-generator subagent now to generate $1. Do not call MCP or memory tools, and do not run shell commands. When done, print exactly: SAVED: <absolute path>." \
     --model "Gemini 3.8 Flash (High)" --output-format json </dev/null)
@@ -960,7 +962,16 @@ agy_image() (   # usage: agy_image "description" OUTPUT-DIR   (exit 3 = no image
     *) echo "agy_image: path is outside this run's folder: $src" >&2; exit 3 ;;
   esac
   { [ -n "$cid" ] && [ -f "$src" ] && [ ! -L "$src" ]; } || { echo "agy_image: file missing" >&2; exit 3; }
-  cp "$src" "$2"/ && printf '%s\n' "$2/${src##*/}"
+  # never overwrite: copy to a temp name in OUTPUT-DIR, then hard-link it to the final name.
+  # ln fails if that name already exists (also a symlink) and does not follow it.
+  dst="$2/${src##*/}"
+  tmp=$(mktemp "$2/.agyimg.XXXXXX") || exit 1
+  cp "$src" "$tmp" && chmod 644 "$tmp" || exit 1
+  if ln "$tmp" "$dst" 2>/dev/null; then printf '%s\n' "$dst"; exit 0; fi
+  if [ -e "$dst" ] || [ -L "$dst" ]; then
+    echo "agy_image: $dst already exists; not overwriting (the image is still at $src)" >&2; exit 4
+  fi
+  echo "agy_image: could not hard-link into $2 (filesystem without hard links?); the image is still at $src" >&2; exit 1
 )
 agy_image "a simple green square on a white background" /path/to/output-dir
 ```
