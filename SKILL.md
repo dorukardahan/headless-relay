@@ -126,9 +126,13 @@ not proof of present-day whole-repo uploads. The July findings above are histori
 see [SECURITY.md](SECURITY.md) for dated sources and scope.
 
 The hosted Grok lane is a **cloud model**: supplied prompt/context goes to xAI.
-The helpers do not make it local or guarantee provider retention. They do not give
-Grok repository access; relay only the explicitly allowed brief. Subscription auth
-still grants read/write on its credential parent directory; use a dedicated directory.
+The helpers do not make it local or guarantee provider retention. They launch from
+an empty non-git working directory, but do not guarantee zero repository access:
+subscription auth grants read/write on the credential's whole parent directory,
+including any source files beside it. Use a dedicated credential directory outside
+all repository trees, containing only auth material; the helper does not enforce
+that recommendation for every ancestor or directory member. Relay only the explicitly
+allowed brief.
 
 **Two helper functions — define once, use for every Grok call.** Each is a subshell (`name() ( … )`)
 with `set +eux` (never inherits the caller's errexit/nounset, and disables xtrace so a key can't be

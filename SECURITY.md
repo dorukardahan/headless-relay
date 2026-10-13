@@ -5,9 +5,11 @@ hosted model lanes. The helpers reduce unintended local context and inherited
 environment: `env -i`, an empty synthetic `HOME`, a clean temporary `GROK_HOME`,
 an empty non-git working directory, restricted tools and a watchdog. They are
 not a full OS sandbox, and do not guarantee provider-side retention. Subscription
-auth still needs a read/write grant on the credential's parent directory; use a
-dedicated directory. Scope is personal/consumer auth; team/enterprise managed-policy
-parity is unverified (§5).
+auth still needs a read/write grant on the credential's whole parent directory,
+including any source files beside it. Use a dedicated auth-only directory outside
+all repository trees; the helper does not enforce this for every ancestor or directory
+member. Scope is personal/consumer auth; team/enterprise managed-policy parity is
+unverified (§5).
 
 Earlier Grok Build versions separately uploaded whole repositories. The incident,
 wire observations and July source audit below are retained as **dated historical

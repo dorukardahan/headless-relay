@@ -22,8 +22,9 @@ For Grok, use `grok_relay` / `grok_media`: they limit inherited environment and
 local context with an empty synthetic `HOME`, a clean temporary `GROK_HOME`, a
 non-git working directory, restricted tools and a watchdog. This is defense in
 depth, **not a full OS sandbox** or a guarantee about provider-side retention.
-Subscription auth grants read/write access to the credential's parent directory;
-use a dedicated credential directory. Personal/consumer auth is supported;
+Subscription auth grants read/write access to the credential's whole parent directory;
+use a dedicated auth-only directory outside repository trees. This is a recommendation,
+not a complete enforced repository-access boundary. Personal/consumer auth is supported;
 team/enterprise managed-policy parity is unverified.
 [Historical Grok Build repo-upload evidence, dated audits and hardening details](SECURITY.md)
 are separate from today's model-turn traffic; the old incident is not a claim
