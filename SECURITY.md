@@ -1,35 +1,51 @@
 # Security: Grok Build and your data
 
-**TL;DR.** Earlier *shipped* versions of the xAI Grok Build CLI (`grok`), run inside a git
-repository, uploaded your **entire tracked repository as a git bundle** (full commit history and
-every tracked file, including a tracked `.env`) to xAI-controlled cloud storage, regardless of which
-files the model actually read. That was real — confirmed by xAI's own account and by independent
-wire capture. On **2026-07-15 xAI open-sourced Grok Build** (Apache-2.0,
-`github.com/xai-org/grok-build`), deleted previously-retained coding data, and set retention off by
-default. A source audit of that release (commit `c68e39f`) found the **whole-repo bundle path is
-gone from the source**, the remaining trace-upload defaults **off**, and your **local
-`~/.grok/config.toml` beats xAI's remote settings**. Two residual concerns remain, so headless-relay
-(v3.0.0+) still routes Grok through two small helpers: they run `grok` under a **hermetic child
-environment** (`env -i` allowlist — only a handful of vars reach grok, dropping your other secrets and
-grok's own endpoint / auth-provider-command / log / compat overrides) with an **empty synthetic
-`HOME`** AND a **clean temporary `GROK_HOME`** (so it reads neither your `~/.claude` / `~/.cursor` /
-`~/.codex` config nor grok's own `~/.grok/AGENTS.md` into the model turn — both are still-default
-scans), with auth supplied out-of-band via **`GROK_AUTH_PATH` → your real `auth.json`** (grok refreshes
-it in place; the wrapper never reads or copies it) or **`XAI_API_KEY`**, in an **empty non-git dir**
-(verified outside any git tree) **with tool use locked down**, under a real watchdog timeout (cheap insurance,
-because the shipped binary can't be verified against the open source). Scope is **personal / consumer**
-auth; team/enterprise managed-policy parity is unverified (§5). Grok is still a **cloud model** — the
-prompt goes to xAI. The other four lanes are unaffected.
+**TL;DR.** The hosted Grok lane sends the supplied prompt/context to xAI, like other
+hosted model lanes. The helpers reduce unintended local context and inherited
+environment: `env -i`, an empty synthetic `HOME`, a clean temporary `GROK_HOME`,
+an empty non-git working directory, restricted tools and a watchdog. They are
+not a full OS sandbox, and do not guarantee provider-side retention. Subscription
+auth still needs a read/write grant on the credential's parent directory; use a
+dedicated directory. Scope is personal/consumer auth; team/enterprise managed-policy
+parity is unverified (§5).
 
-This document exists so a user who never heard of the incident cannot be surprised by it, so anyone
-who already ran Grok Build can assess and contain their exposure, and to record exactly what the
-2026-07-15 open-sourcing does and does not change.
+Earlier Grok Build versions separately uploaded whole repositories. The incident,
+wire observations and July source audit below are retained as **dated historical
+evidence**, not a claim that current versions automatically upload entire repos.
+
+## Current evidence — 2026-10-13
+
+This was a targeted documentation/source recheck, **not a fresh whole-tree upload audit**,
+network capture, retention audit or installed-binary verification.
+
+- [Official settings reference](https://docs.x.ai/build/settings/reference) (updated
+  2026-10-10) still documents Claude/Cursor compatibility scans as enabled by default.
+  In source snapshot [`2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8`](https://github.com/xai-org/grok-build/tree/2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8),
+  `crates/codegen/xai-grok-config/src/compat.rs` owns the defaults and marks Codex's
+  non-session cells reserved, not consumed by discovery. Global Grok instruction
+  discovery remains in `crates/codegen/xai-grok-agent/src/prompt/agents_md.rs`.
+- The current [official installer](https://x.ai/cli/install.sh), also published as
+  `crates/codegen/xai-grok-pager/scripts/install.sh` in that snapshot, downloads from
+  `https://x.ai/cli`, with `https://storage.googleapis.com/grok-build-public-artifacts/cli`
+  as fallback. The old description of a different private GitHub release repository
+  is obsolete. A public download location alone does not establish binary/source parity.
+- The source README describes periodic monorepo syncs and a `SOURCE_REV` marker.
+  This recheck did not establish a reproducible, source-matched installed artifact.
+  Keep that evidence limit separate from any allegation of current data exfiltration;
+  source/binary provenance is a general CLI supply-chain concern, not unique to Grok.
+- [Official data/privacy documentation](https://docs.x.ai/developers/faq/security)
+  distinguishes ZDR from `/privacy` and `/settings` retention controls. Disabled
+  retention does not make cloud inference local or mean that prompts are not transmitted.
+
+The technical detail in §§1–4 and the source line references in §5 describe the
+named historical snapshots unless explicitly refreshed above. Keep source review,
+installed-binary observation and synthetic wrapper tests separate.
 
 ---
 
 ## 1. What happened (the incident)
 
-Grok Build has two separate outbound data paths:
+The historical incident involved two separate outbound data paths:
 
 - **Channel A — model turns.** The prompt, the model's context, and the files the model actually
   opens (including a `.env` it reads) go to the inference backend (`POST /v1/responses` on
@@ -58,7 +74,7 @@ Grok Build has two separate outbound data paths:
   never-read files, ~5.1 GiB went to `/v1/storage`. The same rig showed Claude Code, Codex, and
   Gemini sent no whole-repo bundle (they are still cloud models that transmit the files they read).
 
-**Also confirmed — a second, separate egress (global rules), still present.** Independent of the
+**Historical observation — a second, separate egress (global rules).** Independent of the
 bundle, Grok auto-loads global project rules into every model turn: `~/.grok/AGENTS.md`, and — via
 its Claude/Cursor **compatibility scanners, every `[compat.*]` cell default ON** — your
 `~/.claude/CLAUDE.md`, `~/.claude/settings.json` hooks, `~/.claude/skills`, and `~/.claude.json` MCP
@@ -84,14 +100,13 @@ proven; training is a separate policy question).
 - xAI docs (official controls): https://docs.x.ai/build/settings/reference ,
   https://docs.x.ai/build/enterprise (ZDR is enforced at the Team/Enterprise level; xAI also
   states API-key use of Grok Build respects ZDR)
-- Re-checked on X 2026-07-22: the incident, the 2026-07-13 server-side upload halt, and the 2026-07-15
-  open-sourcing stay corroborated by the researcher (cereblab) and follow-up community analyses (through
-  2026-07-20); nothing since contradicts the audit below. The shipped binary remains unverifiable against
-  the source, which is why the helper isolates Grok rather than trusting the toggle, the audit, or the fix.
+- Historical X recheck, 2026-07-22: the researcher and follow-up community analyses
+  corroborated the incident, the 2026-07-13 server-side upload halt and 2026-07-15
+  open-sourcing. This receipt covers that review window, not every later CLI release.
 
 ---
 
-## 4. What the 2026-07-15 open-sourcing changed
+## 4. Historical source audit — 2026-07-15
 
 On 2026-07-15 xAI open-sourced Grok Build (Apache-2.0), reset usage limits, deleted previously
 retained coding data, and set retention off by default. A source audit of the published tree
@@ -133,14 +148,11 @@ retained coding data, and set retention off by default. A source audit of the pu
   account is not carried** into the relay. The wrapper cannot detect account type (reading auth
   content is out of scope), so it supports **personal / consumer** auth only — see §5.
 
-**Residual #2 — the shipped binary can't be verified against the source.** There are no GitHub
-releases, tags, signatures, or reproducible-build tooling in the repo; the official installer pulls
-from a *different* (private) repo, and the auto-updater `exec()`s the downloaded binary after only a
-`--version` smoke test; a literal `cargo build` reports a version string matching no shipped release;
-the published tree is "synced periodically from a monorepo" and already advanced past `c68e39f` via
-unsigned bot commits. So "the open source is clean" does **not** prove "the binary you run is clean."
-This is a general caveat for **any** closed-binary relay target (Codex and agy included), not unique
-to Grok — but it is why the helper keeps cheap belt-and-suspenders rather than trusting the binary.
+**Historical source/binary evidence limit.** The July audit did not establish that
+an installed vendor binary matched the published source or a reproducible build.
+That is a limit of the evidence, not proof of malicious binary behavior. Installer
+channels have since changed; see the dated current-evidence section above. These
+provenance checks also matter for other vendor-distributed CLI targets.
 
 Pre-open-source wire-tests (2026-07-13/14, grok 0.2.99 / 0.2.101) are consistent with all of the
 above: the bundle upload was already server-*off* via a remote flag (not locally controllable then),
