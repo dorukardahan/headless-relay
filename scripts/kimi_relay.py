@@ -28,18 +28,60 @@ def non_git(path):
     return True
 
 
+def leader_unreaped(pid):
+    """True while pid is our own exited child that nobody has reaped yet."""
+    # waitid(P_PID) only succeeds for a child of this process, and WNOWAIT
+    # leaves it waitable, so a True answer also proves the PID is not reused.
+    try:
+        return os.waitid(os.P_PID, pid, os.WEXITED | os.WNOHANG | os.WNOWAIT) is not None
+    except ChildProcessError:
+        return False
+
+
+def owns_group(pid):
+    try:
+        return os.getpgid(pid) == pid
+    except ProcessLookupError:
+        # macOS answers ESRCH for an exited-but-unreaped leader. It is still our
+        # waitable child, so neither its PID nor its PGID can have been reused.
+        return leader_unreaped(pid)
+
+
+def live_group_members(pgid):
+    """PIDs in pgid that are not zombies, read from ps (POSIX -A -o)."""
+    ps = shutil.which('ps', path=os.defpath) or '/bin/ps'
+    listing = subprocess.run([ps, '-A', '-o', 'pid=,pgid=,stat='], stdin=subprocess.DEVNULL,
+                             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=True, text=True)
+    members = []
+    for line in listing.stdout.splitlines():
+        fields = line.split()
+        if len(fields) >= 3 and fields[1] == str(pgid) and not fields[2].startswith('Z'):
+            members.append(int(fields[0]))
+    return members
+
+
+def signal_owned_group(pid, signum):
+    try:
+        os.killpg(pid, signum)
+    except PermissionError:
+        # macOS answers EPERM when the only member left is our zombie leader.
+        # Accept that case alone; a live member we cannot signal still refuses.
+        if not leader_unreaped(pid) or live_group_members(pid):
+            raise
+
+
 def cancel_owned_group(proc):
     """TERM then KILL before reaping; an exited zombie still pins its PID/PGID."""
     # This function is called exactly once, and no other code reaps this child.
-    if os.getpgid(proc.pid) != proc.pid:
+    if not owns_group(proc.pid):
         raise RuntimeError('Kimi leader no longer owns its process group')
-    os.killpg(proc.pid, signal.SIGTERM)
+    signal_owned_group(proc.pid, signal.SIGTERM)
     time.sleep(.2)
     # Do not wait/poll in the grace period: TERM can exit the leader while a
     # descendant ignores it. The unreaped leader prevents PGID reuse here.
-    if os.getpgid(proc.pid) != proc.pid:
+    if not owns_group(proc.pid):
         raise RuntimeError('Kimi process-group ownership changed')
-    os.killpg(proc.pid, signal.SIGKILL)
+    signal_owned_group(proc.pid, signal.SIGKILL)
     return proc.wait()
 
 

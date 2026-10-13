@@ -176,6 +176,13 @@ never copy a Kimi token into OpenCode, never log out of OpenCode to switch Kimi,
 does not prove OAuth. The requested Kimi call is the bounded auth check—if it returns a login
 error, surface it and have the user run `kimi login`.
 
+Kimi Code OAuth needs a paid Kimi membership. The free Adagio plan shows no Kimi Code access on the
+official pricing page (`kimi.ai/membership/pricing`, checked 2026-10-13), so a free account can
+log in but has no coding quota. The CLI's other login, a Moonshot AI Open Platform API key, is
+billed per token. Check `kimi --version` first: the Kimi Code CLI prints a bare version such as
+`2.1.1`, while the archived Python `kimi-cli` (`MoonshotAI/kimi-cli`, archived in favour of
+`MoonshotAI/kimi-code`) prints `kimi, version 1.x` and rejects this lane's flags.
+
 OpenCode separately offers Kimi providers such as `kimi-for-coding/k3`, but those use a Kimi Code
 API key rather than the native CLI's device OAuth. That is a different route and is intentionally
 not the built-in Kimi lane here.
@@ -249,7 +256,10 @@ in a stable working directory, native Kimi can continue with `kimi -c -p "…"` 
 session with `kimi -S "<session-id>" -p "…"`; those direct forms are not text-only isolation.
 
 **Permission and subscription boundary:** `-p` uses Kimi's `auto` permission policy and cannot be
-combined with `--plan`; do not call it read-only or silently point it at a repository. Pass a diff
+combined with `--plan`; do not call it read-only or silently point it at a repository. `auto` is
+the "Never Ask" mode: Kimi Code's docs say it approves access to sensitive files such as `.env`
+or SSH keys and runs commands such as `rm -rf` without asking, because the dangerous-command guard
+is not active in that mode. Only static `[[permission.rules]]` deny entries still apply. Pass a diff
 or file text in the prompt for review-only work, and rely on static Kimi permission rules before
 granting repo access. Kimi's subscription guidelines allow personal interactive use across Kimi
 CLI and agent frameworks but forbid unattended batch/data-annotation pipelines, account/API
@@ -1168,6 +1178,9 @@ structured output for the precise reason. When capturing a piped tool's exit thr
 | Kimi reports no provider / not logged in | Native Kimi OAuth is absent or expired; OpenCode auth is unrelated | Run `kimi login` and complete the device-code flow; do not copy token files or log out of OpenCode/Z.AI |
 | Kimi rejects K3 with an entitlement error | The current membership tier does not expose native K3 | Report the exact error and let the user choose another native alias, e.g. `kimi-code/kimi-for-coding`; never silently substitute GLM or OpenCode Go |
 | Kimi `-p` modifies files during a review | Print mode uses `auto` permissions and cannot combine with `--plan` | Pass the diff/file text in the prompt; only grant repo access after static Kimi permission rules are suitable |
+| Kimi: `Invalid value for --output-format: Output format is only supported for print UI` | The archived Python `kimi-cli` (`kimi, version 1.x`) is first on PATH; its `-p` is only the prompt text | Install the Kimi Code CLI (`@moonshot-ai/kimi-code`) and make its `kimi` resolve first |
+| Kimi logs in but has no coding quota | The free Adagio plan includes no Kimi Code access | Use a paid membership, or configure a metered Open Platform API key with `/login`; then check the model aliases with `kimi provider list --json` before passing one |
+| `kimi-relay: refusing: [Errno 3] No such process` after every macOS run, real exit status hidden | Older relay: macOS answers ESRCH from `getpgid` and EPERM from `killpg` for the exited-but-unreaped leader | Update the skill; the fixed helper proves ownership with `waitid(WNOWAIT)` and accepts EPERM only when no live member remains |
 | Kimi `-p` remains alive after the answer | Background tasks/subagents keep print mode alive by default | Bound the shell/tool call; if the user wants one-turn behavior, they may set `print_background_mode = "exit"` in their Kimi config |
 | Kimi works manually but automation is rejected/suspended | Kimi Code subscriptions are limited to personal interactive use | Keep native OAuth relays user-triggered; use metered Kimi Platform credentials for cron, batch, or services |
 | zcode: `Model config is missing. Create ~/.zcode/cli/config.json …` | No CLI config and no env vars | Apply Recipe A, B, or C above |
