@@ -21,7 +21,7 @@ the answer back. Follow these patterns exactly.
 | GLM | `opencode`, or `zcode` (ships inside the ZCode desktop app) | `opencode run` / `zcode --prompt` | Z.ai Coding Plan (API key or ZCode app login) |
 | Kimi K3 | `kimi` (Kimi Code CLI) | `kimi -p` | Kimi membership through native device-code OAuth (`kimi login`) |
 | Grok | `grok` (xAI Grok Build) | `grok -p` — via the `grok_relay` helper (empty `HOME` + clean temp `GROK_HOME` so it can't read your other tools' config or grok's own global rules; see the next section) | SuperGrok (`grok login`) or `XAI_API_KEY` |
-| Gemini | `agy` (Google Antigravity CLI — replaced the retired Gemini CLI) | `agy -p` / `--print` | Google account via the Antigravity app/CLI |
+| Gemini | `agy` (Google Antigravity CLI; the standalone Gemini CLI is not a drop-in lane, see [references/cli-reference.md](references/cli-reference.md)) | `agy -p` / `--print` | Google account via the Antigravity app/CLI |
 | Claude | `claude` (Claude Code) | `claude -p`, or the harness's native subagent | Anthropic auth of the current session |
 
 ## Kimi text relay — isolate the working directory
@@ -580,7 +580,7 @@ substitute a different model to fill the gap.
 | GLM via OpenCode | `command -v opencode` AND `opencode --version` prints a version (an old CLI binary can be killed silently by macOS; the desktop app does not update it — see [references/cli-reference.md](references/cli-reference.md)) | `opencode auth list` shows a Z.AI credential |
 | GLM via ZCode | `command -v zcode` (add a PATH wrapper if only the app is installed) | `~/.zcode/cli/config.json` exists or `ZCODE_API_KEY` is set. `zcode login` is currently broken, and app 3.14.5 needs a small symlink shim before any call works (error `无法定位 CLI ZCode Built-in Provider Config`, "cannot locate the built-in provider config") — see [references/cli-reference.md](references/cli-reference.md) |
 | Grok | `command -v grok` | Run `grok models` (catalog fetch, no model turn). A model list proves the CLI authenticated, even with a stale "not authenticated" header, but it does **not** prove `grok-4.7` access: require an exact `grok-4.7` entry under `Available models:` before setting `GROK_RELAY_MODEL=grok-4.7` for either helper. Otherwise retain the 4.6 default only if the list has `grok-4.6`, or set `GROK_RELAY_MODEL=grok-4.5` if only 4.5 is listed. If none is listed, skip the Grok lane; never guess a pin. With no model list, follow [the auth ladder](references/cli-reference.md). |
-| Gemini via Antigravity | `command -v agy` | `agy models` lists the model menu when logged in; the default model comes from the user's Antigravity config |
+| Gemini via Antigravity | `command -v agy`; `agy --version` (print-mode behavior changed in 1.3.x) | `agy models` lists the model menu when logged in. The menu differs per account (Gemini 4 Argon is Ultra/Enterprise only), so check it on the account you use; the default model comes from the user's Antigravity config |
 | Claude | `command -v claude`; `claude --version` | `claude-opus-5-5` requires Claude Code 2.1.280+; 2.1.260 returns HTTP 400. Confirm signed-in status on the intended profile and the actual `modelUsage` id after a bounded run. Keep the compliance gate below. |
 
 Rules:
@@ -720,7 +720,8 @@ kimi_relay "your question here" "$KIMI_MODEL"
 #        Still a cloud model — never present it as "read-only" or "local".
 grok_relay "your question here"
 
-# Gemini via Antigravity — model name is the display string from `agy models`
+# Gemini via Antigravity — model id or display string from `agy models`. agy 1.3.x exits 0 with
+#   EMPTY output when it auto-denied a tool, so treat an empty answer as a failure.
 agy -p "your question here" --model "Gemini 3.8 Flash (High)"
 
 # Claude (headless subprocess)
@@ -765,7 +766,7 @@ kimi_relay_file "/tmp/handoff.md" "$KIMI_MODEL"
 # re-interpreted, so backticks/$ in the file are safe (same reason `gh --body-file` beats --body).
 grok_relay "$(cat /tmp/handoff.md)"
 
-# Antigravity: no stdin mode — substitute the file into the arg
+# Antigravity: substitute the file into the arg (agy 1.3.x also reads stdin when -p is omitted)
 agy -p "$(cat /tmp/handoff.md)"
 
 # Claude: command-substitute the file into the prompt arg
@@ -887,7 +888,7 @@ explicitly wants an agentic repo task and the user's static Kimi permission rule
 | ZCode | `--json` | `jq -r '.response'`; session id = `.sessionId`, token usage under `.usage` |
 | Kimi | helper arg `stream-json` | JSONL Assistant/Tool messages; capture and inspect the raw stream before selecting the final Assistant message |
 | Grok | `--output-format json` | `jq -r '.text // .result'` |
-| Antigravity | (none) | No JSON mode — stdout is plain text; capture and use it directly |
+| Antigravity | `--output-format json` (agy 1.3.x) | `jq -r '.response'`. An empty `.response` or any `.denied_actions` entry means a tool was refused; agy 1.1.x has no JSON mode |
 | Claude | `--output-format json` | `jq -r '.result'`; session id = `.session_id`, cost = `.total_cost_usd` |
 
 ```bash
@@ -1006,9 +1007,12 @@ watch_clip() (   # subshell: its own EXIT trap, so each clip's workspace is remo
     -c:v libx264 -crf 30 -c:a aac -b:a 96k "$W/clip.mp4" || exit 1
   P=$(cat "$2") || exit 1   # read the prompt before cd; keep it out of the workspace
   # macOS has no `timeout`; perl's alarm bounds the run (agy can hang)
-  cd "$W" && perl -e 'alarm shift; exec @ARGV' 300 \
-    agy -p "$P" --model "Gemini 3.8 Flash (High)" --add-dir "$W" --mode plan --sandbox </dev/null
-  rc=$?; exit "$rc"
+  out=$(cd "$W" && perl -e 'alarm shift; exec @ARGV' 300 \
+    agy -p "$P" --model "Gemini 3.8 Flash (High)" --add-dir "$W" --mode plan --sandbox </dev/null)
+  rc=$?; [ "$rc" -eq 0 ] || exit "$rc"
+  # agy 1.3.4 exits 0 with EMPTY output when it auto-denied a tool ("jetski: no output produced")
+  [ -n "$out" ] || { echo "watch_clip: empty answer; agy probably denied a tool" >&2; exit 3; }
+  printf '%s\n' "$out"
 )
 watch_clip input.mp4 watch-prompt.md
 # many clips: while IFS= read -r f <&3; do watch_clip "$f" watch-prompt.md; done 3< clips.txt
@@ -1108,7 +1112,8 @@ while a same-provider second opinion should stay in-session as a subagent.
 | Kimi: `Invalid value for --output-format: Output format is only supported for print UI` | The archived Python `kimi-cli` (`kimi --version` prints `kimi, version 1.x`) is first on PATH. Install the Kimi Code CLI (`@moonshot-ai/kimi-code`) and make its `kimi` resolve first; do not rewrite the relay for the old CLI |
 | `kimi-relay: refusing: [Errno 3] No such process` after every macOS run | A relay older than this fix treated macOS's answers for the exited-but-unreaped leader (ESRCH from `getpgid`, EPERM from `killpg`) as ownership loss. Update the skill; the fixed helper verifies the leader with `waitid(WNOWAIT)` instead |
 | agy reads/writes files in `~/.gemini/antigravity-cli/scratch` instead of your repo | Antigravity's default working dir is its own scratch workspace — pass `--add-dir /path/to/repo` (it becomes the working directory) |
-| agy: `flag needs an argument: -print` | No stdin pipe — use `agy -p "$(cat /tmp/handoff.md)"` |
+| agy: `flag needs an argument: -print` | `-p` needs its value: use `agy -p "$(cat /tmp/handoff.md)"`, or on agy 1.3.x omit `-p` and pipe the file on stdin |
+| agy exits 0 with empty output; stderr `jetski: no output produced — a tool required the "…" permission` | agy 1.3.x print mode auto-denies tools (shell, file write, URL read, MCP). Tell the model to answer in text without tools, or allow that tool in agy's settings.json; treat empty output as a failed relay |
 | agy `-p` never returns when launched inside a parallel multi-CLI burst | Known agy 1.1.0 timing bug (solo/pairwise runs are reliable) — run the Gemini lane sequentially around the burst, and always cap it with a timeout |
 | GLM cites a CI/workflow/env change not in the diff | Known GLM infra-hallucination — verify against the actual file before acting |
 | A CLI is missing or unauthenticated | Report it and skip that model; do not substitute another silently |

@@ -11,10 +11,15 @@
 - Kimi preflight: the archived Python `kimi-cli` prints `kimi, version 1.x` and fails this lane with `Output format is only supported for print UI`; the Kimi Code CLI prints a bare version.
 - Kimi's free Adagio plan has no Kimi Code access, so native OAuth needs a paid membership; the metered Open Platform API key is the other login.
 - Kimi `auto` permissions are the "Never Ask" mode: sensitive-file access and dangerous commands are approved without asking. Only static deny rules still apply.
+- Gemini lane refreshed for agy 1.3.4 (live-verified 2026-10-13). Print mode now auto-denies tools (shell, file write, URL read, MCP), but the run still exits 0 with an empty answer, so the examples and the `watch_clip` recipe now treat empty output as a failure. JSON output (`--output-format json`, with `denied_actions`), stdin prompts, the `0s` default `--print-timeout` and the `--effort` rule (base model id only) are documented.
+- The model menu is per account: 3.7/3.6 Flash and 3.1 Pro are gone from a personal account, and Gemini 4 Argon (announced 2026-10-13) is for Google AI Ultra and eligible Gemini Enterprise subscriptions only.
+- Gemini CLI wording corrected: it is still released, but its free individual tier rejects the CLI with `UNSUPPORTED_CLIENT`. It needs `GOOGLE_CLOUD_PROJECT` with a Code Assist Standard or Enterprise license, and `--skip-trust` for headless runs in untrusted folders.
+- Video timing limits: a 1-fps watching lane cannot judge sub-second subtitle timing. Use a speech-to-text API with word timestamps for that.
 
 ### Verification
 
 - `scripts/test-kimi-runtime.py`: 22 tests pass on macOS 27 (Darwin), including 4 new tests that emulate the macOS answers on any POSIX host. Before the fix, 26 subtests failed on the same machine, and the 4 new tests fail against the old relay. The other regression scripts and the Grok runtime matrix (228 passed, 0 failed) still pass. No real Kimi inference was run.
+- Live agy 1.3.4 runs on 2026-10-13: tool denial for a command, a file write and a URL read (exit 0, empty `response`, `denied_actions`); JSON and stdin prompts; `--effort` with an id and with a display string; the updated `watch_clip` in bash and zsh, including the empty-answer exit 3. The agy parallel-burst hang was not retested.
 
 ## [3.2.0] - 2026-10-13
 

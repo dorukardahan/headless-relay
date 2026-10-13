@@ -761,16 +761,30 @@ always wrong.
 
 ## Gemini via Antigravity — agy print mode
 
-Google retired the standalone Gemini CLI; its replacement is the Antigravity CLI, `agy`
-(install: `curl -fsSL https://antigravity.google/cli/install.sh | bash`; the old `gemini`
-binary may linger on PATH — do not use it). Auth comes from the Antigravity app/CLI Google
-login. All behavior below live-verified 2026-07-08 on agy 1.1.0.
+The Antigravity CLI, `agy`, is the default Gemini lane (install:
+`curl -fsSL https://antigravity.google/cli/install.sh | bash`). Auth comes from the Antigravity
+app/CLI Google login. First verified 2026-07-08 on agy 1.1.0; re-verified 2026-10-13 on agy 1.3.4,
+where print mode changed in three ways: it now auto-denies tools, it has JSON output, and it reads
+the prompt from stdin.
+
+The standalone Gemini CLI (`gemini`, `google-gemini/gemini-cli`) is still released, but it is not
+a drop-in lane for personal Google accounts. Its source (0.62.0, `code_assist/setup.ts`) puts a
+Google login without `GOOGLE_CLOUD_PROJECT` on the free "Gemini Code Assist for individuals" tier,
+and that tier now rejects the CLI with `UNSUPPORTED_CLIENT`. With a Cloud project that has a Code
+Assist Standard or Enterprise license, set `GOOGLE_CLOUD_PROJECT`. Its OAuth also asks for the
+`cloud-platform` scope, so organisations with Google Cloud session controls can expire the
+login daily. Headless runs in an untrusted folder also need `--skip-trust` (or
+`GEMINI_CLI_TRUST_WORKSPACE=true`). API-key auth was not tested here.
 
 | Flag | Meaning |
 |------|---------|
-| `-p, --print <PROMPT>` | Run a single prompt non-interactively, print the response, exit. `--prompt` is an alias. |
-| `--print-timeout <dur>` | Print-mode wait cap, default `5m0s`. |
-| `--model <name>` | Display-string model name from `agy models`, e.g. `"Gemini 3.8 Flash (High)"`. Omit to use the user's configured default. |
+| `-p, --print <PROMPT>` | Run a single prompt non-interactively, print the response, exit. `--prompt` is an alias. On 1.3.4 the prompt can also come from stdin when `-p` is omitted (`agy --model … < handoff.md`). `-p` with no value consumes the next flag as the prompt. |
+| `--output-format <fmt>` | `text` (default), `json`, `stream-json`. JSON keys: `conversation_id`, `status`, `response`, `error`, `duration_seconds`, `num_turns`, `usage`, plus `denied_actions` when a tool was refused. |
+| `--json-schema <schema\|file>` | Enforce structured output (for `stream-json`, only on the final result). |
+| `--input-format stream-json` | One NDJSON message per stdin line, one turn each; requires `--output-format stream-json`. |
+| `--print-timeout <dur>` | Print-mode wait cap. Default `0s` on 1.3.4 (wait until the turn completes; it was `5m0s` on 1.1.x), so always bound the call yourself. |
+| `--model <name>` | A model id or display string from `agy models`, e.g. `gemini-3.8-flash-high` or `"Gemini 3.8 Flash (High)"`. Omit to use the user's configured default. |
+| `--effort <level>` | `low\|medium\|high\|xhigh\|max`. Works only with a base model id: `--model gemini-3.8-flash --effort high`. With a display string such as `"Gemini 3.8 Flash (High)"` it fails with `--effort is not supported for model`, and `"Gemini 3.8 Flash"` without a tier suffix is not a valid model. |
 | `--add-dir <path>` | Add a directory to the workspace (repeatable) — it also BECOMES the working directory. Without it agy works in its own scratch dir, `~/.gemini/antigravity-cli/scratch`. |
 | `--mode <mode>` | `accept-edits`, `plan`. Use `plan` for advice-only runs. |
 | `--sandbox` | Enable terminal restrictions. |
@@ -778,31 +792,38 @@ login. All behavior below live-verified 2026-07-08 on agy 1.1.0.
 | `-c, --continue` / `--conversation <id>` | Resume the most recent conversation / a specific one. |
 | `-i, --prompt-interactive` | Run a prompt then stay interactive — NOT headless; avoid in scripts. |
 
-Model menu (`agy models`, 2026-09-21 on agy 1.1.1): Gemini 3.8 Flash (Low/Medium/High),
-Gemini 3.7 Flash, Gemini 3.6 Flash, Gemini 3.1 Pro (Low/High), Claude Sonnet 4.6 (Thinking),
-Claude Opus 4.6 (Thinking), GPT-OSS 120B (Medium) —
-the non-Google models are served through Google's platform. The reasoning tier is baked into
-the model name; `"Gemini 3.8 Flash (High)"` is the current top Gemini Flash tier on this
-CLI (Pro remains available as `"Gemini 3.1 Pro (High)"`).
+The model menu depends on the account and can change between checks, so run `agy models` on the
+account you will use. On 2026-10-13 (agy 1.3.4, personal Google account) it listed
+`gemini-3.8-flash-high|medium|low`, `claude-sonnet-4-6`, `claude-opus-4-6-thinking` and
+`gpt-oss-120b-medium`. Gemini 3.7 Flash, 3.6 Flash and 3.1 Pro, listed on 2026-09-21, were gone,
+and `"Gemini 3.1 Pro (High)"` now fails with "is not recognized as a known model". Google
+announced Gemini 4 Argon on 2026-10-13 for the Antigravity app and CLI, for Google AI Ultra and
+eligible Gemini Enterprise subscriptions only; it was not in this non-Ultra account's menu. The
+non-Google models are served through Google's platform.
 
 Notes, all live-verified:
+- **Print mode auto-denies tools on 1.3.4.** A shell command, a file write and a URL read were
+  each refused because "headless mode cannot prompt". The run still **exits 0** with
+  `status: "SUCCESS"` and an **empty** `response`. stderr says `jetski: no output produced — a
+  tool required the "command" permission…`, and JSON lists `denied_actions`. Treat an empty answer
+  or any `denied_actions` entry as a failed relay. For text relays, say in the prompt that the
+  model must not run shell commands, call MCP tools or create files, and must answer in text.
+  To allow a tool, add a `permissions.allow` rule in agy's settings.json, or pass
+  `--dangerously-skip-permissions` only with the user's explicit opt-in. On 1.1.0 the same tools
+  ran unprompted (a file write, `curl` and authenticated `gh` all ran), so check the version.
 - **The old Gemini CLI's per-user API concurrency cap is gone**: three parallel `agy -p` runs
-  completed in 8s wall clock — identical to a single run.
+  completed in 8s wall clock — identical to a single run (1.1.0).
 - **BUT do not launch agy inside a parallel burst with other model CLIs.** Bisected over 19
   live runs (2026-07-09): `agy -p` hangs indefinitely (9/9) when started alongside 3+ other
   concurrent CLIs (codex/opencode/grok) whose lanes run for more than a few seconds; solo and
   pairwise runs pass 100%, and a 5s stagger does not help. Timing/load-sensitive bug in agy
-  1.1.0 — run the Gemini lane sequentially (before or after the burst), cap it with a timeout,
-  and retest on future agy releases. Reported upstream with the full repro matrix:
-  github.com/google-antigravity/antigravity-cli/issues/573.
-- Baseline latency ~8s for a trivial prompt; agentic runs (tool calls) ~20s.
-- No stdin pipe (`flag needs an argument: -print`) — pass files as `agy -p "$(cat file)"`.
-- No JSON output format; stdout is plain text.
-- Print mode executes shell/file/network tools WITHOUT prompting (file write, `curl` (200),
-  and authenticated `gh` all ran unprompted) — treat it like a yolo mode. Constrain with
-  `--mode plan` or `--sandbox` for advice-only handoffs.
+  1.1.0, not retested on 1.3.4 — run the Gemini lane sequentially (before or after the burst),
+  cap it with a timeout, and retest on future agy releases. Reported upstream with the full repro
+  matrix: github.com/google-antigravity/antigravity-cli/issues/573.
+- Baseline latency ~3-15s for a trivial prompt on 1.3.4, depending on the reasoning tier; each
+  call carries about 17K input tokens of agy's own context.
 - Working-directory gotcha: file operations land in the scratch workspace unless you pass
-  `--add-dir /path/to/repo`; reads of absolute paths outside the workspace worked.
+  `--add-dir /path/to/repo`; reads of absolute paths outside the workspace worked (1.1.0).
 
 ## Media generation (image / video)
 
@@ -945,15 +966,18 @@ watch_clip() (   # subshell: its own EXIT trap, so each clip's workspace is remo
     -c:v libx264 -crf 30 -c:a aac -b:a 96k "$W/clip.mp4" || exit 1
   P=$(cat "$2") || exit 1   # read the prompt before cd; keep it out of the workspace
   # macOS has no `timeout`; perl's alarm bounds the run (agy can hang)
-  cd "$W" && perl -e 'alarm shift; exec @ARGV' 300 \
-    agy -p "$P" --model "Gemini 3.8 Flash (High)" --add-dir "$W" --mode plan --sandbox </dev/null
-  rc=$?; exit "$rc"
+  out=$(cd "$W" && perl -e 'alarm shift; exec @ARGV' 300 \
+    agy -p "$P" --model "Gemini 3.8 Flash (High)" --add-dir "$W" --mode plan --sandbox </dev/null)
+  rc=$?; [ "$rc" -eq 0 ] || exit "$rc"
+  # agy 1.3.4 exits 0 with EMPTY output when it auto-denied a tool ("jetski: no output produced")
+  [ -n "$out" ] || { echo "watch_clip: empty answer; agy probably denied a tool" >&2; exit 3; }
+  printf '%s\n' "$out"
 )
 watch_clip input.mp4 watch-prompt.md
 # many clips: while IFS= read -r f <&3; do watch_clip "$f" watch-prompt.md; done 3< clips.txt
 ```
 
-`--mode plan --sandbox` keeps this analysis-only: print mode otherwise runs shell, file and
+`--mode plan --sandbox` keeps this analysis-only: on agy 1.1.0 print mode ran shell, file and
 network tools unprompted (see the notes above), and a clip or prompt can carry misleading
 instructions. Verified 2026-10-09: with both flags the clip was still watched and transcribed,
 while a request to create a file in the workspace was refused. Tell it to only read `clip.mp4`, not to search or create files, to mark unclear words as
@@ -961,8 +985,20 @@ while a request to create a file in the workspace was refused. Tell it to only r
 fed on a separate descriptor (as shown), so ffmpeg and agy cannot consume the list. Keep the prompt to watching the clip: a prompt
 that also asks it to list the directory or use another tool can end with `jetski: no output
 produced — a tool required the "mcp" permission that headless mode cannot prompt for` (seen
-2026-10-09; the same recipe with a watch-only prompt answered). Keep `ffmpeg -nostdin` in any loop
-(ffmpeg otherwise eats the loop's stdin).
+2026-10-09; the same recipe with a watch-only prompt answered). On 1.3.4 such a run exits 0 with
+empty output, which is why the recipe checks for an empty answer. Put a line such as "Do not run
+shell commands, do not call MCP tools, do not create files; answer in text only" in the watch
+prompt: on 2026-10-13 that line turned a run that had ended with the "command" permission error
+into a normal answer. Keep `ffmpeg -nostdin` in any loop (ffmpeg otherwise eats the loop's stdin).
+
+**Timing limits.** About one frame per second means any sub-second judgement from a watching lane
+is a hypothesis. On 2026-10-13 the High and Medium Gemini 3.8 Flash tiers checked 16 subtitle
+cues burned into a preview: Medium passed all 16, while High flagged two cues as about 0.8 s
+late; the audio showed both flags were sampling artifacts. Word timestamps that Gemini 3.8 Flash
+returned over an API for the same clip drifted by -0.5 to +1.2 s. No lane in this skill returns
+reliable word-level timestamps. For subtitle timing, use a speech-to-text API that returns word
+timestamps (for example ElevenLabs Scribe v2 with `timestamps_granularity=word`, about 10 ms
+resolution), and use the watching lane for content review only.
 
 **GLM: why the CLIs fail, and the path that works.**
 - `opencode` 1.18.35 lists `zai-coding-plan/glm-5.3-flash` with `input.video: true`
@@ -1190,8 +1226,10 @@ structured output for the precise reason. When capturing a piped tool's exit thr
 | GLM confuses similar functions across files | Known limitation | Cross-check its findings against actual file paths |
 | A model returns empty JSON `.text`/`.result`/`.response` | Field name differs by version | Inspect the raw JSON once; adjust the `jq` path |
 | agy file operations land in `~/.gemini/antigravity-cli/scratch` | Antigravity's default working dir is its own scratch workspace, not your cwd | Pass `--add-dir /path/to/repo` (it becomes the working directory); use absolute paths in prompts |
-| agy: `flag needs an argument: -print` | stdin piping is not supported | Use `agy -p "$(cat file)"` — quoted command substitution passes the bytes verbatim |
-| agy modifies files you only wanted reviewed | Print mode runs tools unprompted (yolo-like) | Add `--mode plan` (advice-only) or `--sandbox` |
+| agy: `flag needs an argument: -print` | `-p` was given no value | Use `agy -p "$(cat file)"` (quoted command substitution passes the bytes verbatim), or on agy 1.3.x omit `-p` and pipe the file on stdin |
+| agy exits 0 with empty output; stderr `jetski: no output produced — a tool required the "…" permission` | agy 1.3.x print mode auto-denies tools; JSON output lists `denied_actions` | Tell the model to answer in text without tools, or add a `permissions.allow` rule; treat empty output as a failed relay |
+| agy: `--effort is not supported for model "Gemini 3.8 Flash (High)"` | `--effort` only works with a base model id | Use `--model gemini-3.8-flash --effort high`, or keep the display string without `--effort` |
+| agy modifies files you only wanted reviewed | agy 1.1.x print mode ran tools unprompted (yolo-like); 1.3.x auto-denies them unless `permissions.allow` or `--dangerously-skip-permissions` allows them | Add `--mode plan` (advice-only) or `--sandbox`, and do not pass `--dangerously-skip-permissions` for reviews |
 | agy: `jetski: no output produced — a tool required the "mcp" permission …` | The prompt made agy reach for a tool that headless mode auto-denies (e.g. listing a directory) | Keep the prompt to the task (e.g. watch only `clip.mp4`) and rerun; do not reach for `--dangerously-skip-permissions` |
 | agy `-p` hangs forever inside a parallel multi-CLI burst | agy 1.1.0 timing/load bug when 3+ other model CLIs run concurrently (solo/pairwise reliable; stagger insufficient) | Run the Gemini lane sequentially around the burst; always cap agy with a timeout |
 | CLI missing or "not authenticated" | Not installed / logged out | Report it, skip that model; run `codex login` / `opencode auth login` / `kimi login` / `grok login` as needed — do not substitute another model silently. Exception: Grok's "not authenticated" from `grok models` is not conclusive — walk the Grok availability ladder first |
