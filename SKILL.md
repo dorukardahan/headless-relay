@@ -962,6 +962,7 @@ perl -e 'alarm shift; exec @ARGV' 480 \
 # conversation folder; copy one out only if the reported path is inside THIS run's folder,
 # and never over an existing file (exit 4 if the name is taken)
 agy_image() (   # usage: agy_image "description" OUTPUT-DIR   (exit 3 = no image, 4 = not saved: name taken)
+  command -v jq >/dev/null 2>&1 || { echo "agy_image: needs jq to read agy's JSON" >&2; exit 2; }
   [ -d "$2" ] || { echo "agy_image: OUTPUT-DIR is not a directory: $2" >&2; exit 2; }
   W=$(mktemp -d "${TMPDIR:-/tmp}/agyimg.XXXXXX") && W=$(cd "$W" && pwd -P) || exit 1
   tmp=""; trap 'rm -rf "$W"; [ -z "$tmp" ] || rm -f "$tmp"' EXIT
