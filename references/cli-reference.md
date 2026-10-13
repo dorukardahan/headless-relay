@@ -17,6 +17,7 @@ unverifiable shipped binary, then re-verified 2026-08-14 on grok 1.0.3 (grok-4.6
 ## Contents
 - [GPT — codex exec](#gpt--codex-exec)
 - [GLM via OpenCode — opencode run](#glm-via-opencode--opencode-run)
+- [Kimi K3 — kimi print mode](#kimi-k3--kimi-print-mode)
 - [GLM via ZCode — zcode --prompt](#glm-via-zcode--zcode---prompt)
 - [Grok — grok headless](#grok--grok-headless)
 - [Gemini via Antigravity — agy print mode](#gemini-via-antigravity--agy-print-mode)
@@ -154,6 +155,113 @@ as a backup, then run the preflight (`opencode --version`, `opencode auth list`,
 lists `glm-5.3`, `glm-5.3-flash`, `glm-5.3-highspeed`, `glm-5.2`, `glm-5.2-highspeed`, `glm-5.1`,
 `glm-5`, `glm-5-turbo`, `glm-4.7`, and `echo … | opencode run -m zai-coding-plan/glm-5.3 --variant
 max` answered.
+
+Kimi model overrides and native OAuth never change the independent OpenCode/GLM selector.
+
+## Kimi K3 — kimi print mode
+
+The first-class Kimi lane uses Moonshot's official Kimi Code CLI, not OpenCode. `kimi -p` runs
+one prompt non-interactively and prints the Assistant answer to stdout. Install with the official
+installer (it does not require a preinstalled Node runtime) or, with Node.js 22.19.0 or later,
+`npm install -g @moonshot-ai/kimi-code`; then authenticate the native client once:
+
+```bash
+kimi login
+```
+
+`kimi login` is an RFC 8628 device-code OAuth flow. It writes the token into Kimi Code's own local
+store and refreshes it for the native CLI. **Kimi OAuth and OpenCode/Z.AI auth are independent:**
+never copy a Kimi token into OpenCode, never log out of OpenCode to switch Kimi, and never expect
+`opencode auth list` to prove native Kimi login. `kimi doctor` validates config syntax only; it
+does not prove OAuth. The requested Kimi call is the bounded auth check—if it returns a login
+error, surface it and have the user run `kimi login`.
+
+OpenCode separately offers Kimi providers such as `kimi-for-coding/k3`, but those use a Kimi Code
+API key rather than the native CLI's device OAuth. That is a different route and is intentionally
+not the built-in Kimi lane here.
+
+| Flag | Meaning |
+|------|---------|
+| `-p, --prompt <text>` | Run one prompt non-interactively; Assistant text goes to stdout, thinking/tool progress to stderr. |
+| `-m, --model <alias>` | Select a configured model alias for this invocation. Native K3 is `kimi-code/k3`. |
+| `--output-format <text\|stream-json>` | Human-readable text or JSONL messages; only valid with `-p`. |
+| `-c, --continue` | Continue the latest session for the current working directory. |
+| `-S, --session [id]` | Resume a known session id (or open a picker when no id is supplied). |
+| `--add-dir <dir>` | Add another workspace directory; repeatable. |
+| `--skills-dir <dir>` | Replace auto-discovered skill directories for this invocation; repeatable. |
+
+Model routing order for headless-relay:
+
+1. Treat an explicit "K3" or "Kimi K3" request as native `kimi-code/k3`.
+2. If the user names a different native Kimi model alias, pass that alias verbatim.
+3. With no model named, honor the relay-specific `HEADLESS_RELAY_KIMI_MODEL` variable.
+4. Otherwise default to native K3, `kimi-code/k3`.
+
+For text-review handoffs, first define `kimi_relay` from [SKILL.md](../SKILL.md) and set
+`HEADLESS_RELAY_ROOT` to the absolute installed skill directory, keeping `scripts/kimi_relay.py`
+with it. Python 3/POSIX `waitid(WNOWAIT)` is required; unsupported hosts refuse. It uses a fresh
+physically non-git cwd and absolute empty skills directory, even with a relative `TMPDIR`.
+The external watchdog enforces the default 600-second deadline (positive-integer
+`HEADLESS_RELAY_KIMI_TIMEOUT_SECONDS` override) and cancels the owned process group with TERM,
+0.2-second grace, then KILL before reaping its leader. This applies on timeout (124), INT/TERM/HUP
+(128+signal), and normal/nonzero CLI exit (status preserved). Detached sessions/groups and SIGKILL
+of the supervisor are not covered. The helper never reads, copies, or rewrites token files; the
+first-party CLI necessarily reads and may refresh its own OAuth store.
+
+**Explicit opt-in required:** empty cwd/skills are not an OS sandbox or full context isolation.
+Real-home global instructions (`$KIMI_CODE_HOME/AGENTS.md`, `~/.agents/AGENTS.md`), MCP servers,
+command-executing hooks, inherited environment/endpoint overrides, and session/log retention
+remain active. Deleting the temporary cwd does not erase prompt history. Review these settings
+with the user (never credential contents), explain the exposure and obtain consent; otherwise
+skip Kimi. Native CLI/config behavior varies by version: the original contribution targeted
+0.27.0; this helper's regression evidence uses synthetic CLIs, not live inference or egress.
+
+```bash
+# Explicit K3 means the exact native alias, regardless of the generic relay override.
+kimi_relay "your question here" "kimi-code/k3"
+
+# Generic "ask Kimi" with no model named honors the configured override.
+KIMI_MODEL="${HEADLESS_RELAY_KIMI_MODEL:-kimi-code/k3}"
+kimi_relay "your question here" "$KIMI_MODEL"
+
+# Bounded regular-file input: the adapter refuses >32 KiB before any prompt argv.
+kimi_relay_file "/tmp/handoff.md" "$KIMI_MODEL"
+```
+
+The official aliases currently include `kimi-code/k3`, `kimi-code/kimi-for-coding`, and
+`kimi-code/kimi-for-coding-highspeed`; availability depends on the membership tier. Do not pass
+the API-only id `k3`, the OpenCode selector `kimi-for-coding/k3`, or Claude Code's special
+`k3[1m]` syntax to native `kimi -m`. K3 defaults to `high` reasoning; CLI 0.27.0 has no headless
+reasoning-effort flag.
+
+Structured output is JSONL, not a single result object:
+
+```bash
+KIMI_MODEL="${HEADLESS_RELAY_KIMI_MODEL:-kimi-code/k3}"
+kimi_relay "List changed files" "$KIMI_MODEL" stream-json > /tmp/kimi-run.jsonl
+```
+
+The stream contains Assistant messages and, when tools run, Tool messages. Do not hardcode an
+unverified final-text path across CLI versions—capture the raw stream once and select the last
+Assistant text field from the observed schema. The cwd-reduced agentic helper is intentionally
+one-shot because it creates and removes a fresh cwd. For an explicitly approved agentic session
+in a stable working directory, native Kimi can continue with `kimi -c -p "…"` or resume a known
+session with `kimi -S "<session-id>" -p "…"`; those direct forms are not text-only isolation.
+
+**Permission and subscription boundary:** `-p` uses Kimi's `auto` permission policy and cannot be
+combined with `--plan`; do not call it read-only or silently point it at a repository. Pass a diff
+or file text in the prompt for review-only work, and rely on static Kimi permission rules before
+granting repo access. Kimi's subscription guidelines allow personal interactive use across Kimi
+CLI and agent frameworks but forbid unattended batch/data-annotation pipelines, account/API
+resale, reverse proxies, and client-identity spoofing. Keep this lane user-triggered; use Kimi
+Platform for cron or other automation. Official references: [CLI command](https://www.kimi.com/code/docs/en/kimi-code-cli/reference/kimi-command.html),
+[model aliases](https://www.kimi.com/code/docs/en/kimi-code/models.html), and
+[community guidelines](https://www.kimi.com/code/docs/en/kimi-code/community-guidelines.html).
+
+Kimi 0.27.0 can keep `-p` alive while background tasks or subagents are pending, with effectively
+unbounded defaults. Always give the enclosing shell/tool call a wall-clock timeout. A user who
+wants one-turn behavior can set `print_background_mode = "exit"` in their own Kimi config; the
+relay must not rewrite `~/.kimi-code/config.toml` on their behalf.
 
 ## GLM via ZCode — zcode --prompt
 
@@ -789,10 +897,11 @@ concurrency-hung attempt in a parallel burst — solo, the native tool works. Th
 `google/gemini-3-pro-image` path remains a separate, metered, operator-gated fallback, not a
 requirement.
 
-### GLM / Claude
+### GLM / Kimi / Claude
 
-No image or video generation in `opencode` / `zcode` / `claude -p`. Text only. (Watching a
-video is a different question: see the next section.)
+No documented headless image/video generation in `opencode` / `zcode` / `kimi -p` /
+`claude -p`. Multimodal input does not establish generation support. Watching a video is
+a separate question (below); native Kimi video input has not been tested here.
 
 ## Video understanding (watching a clip)
 
@@ -1012,6 +1121,17 @@ incremental events (files modified, commands run) for CI integration.
 Codex `--json`: JSONL event stream on stdout. Simpler for a single final answer: use
 `-o /tmp/last.txt` to write only the last message, then read the file.
 
+Kimi `--output-format stream-json`: JSONL Assistant and Tool messages. Capture the raw stream
+before parsing because the official CLI documents message roles but does not promise a stable
+single final-result field:
+
+```bash
+KIMI_MODEL="${HEADLESS_RELAY_KIMI_MODEL:-kimi-code/k3}"
+if kimi_relay "summarize the change" "$KIMI_MODEL" stream-json > /tmp/kimi-run.jsonl; then
+  sed -n '1,20p' /tmp/kimi-run.jsonl
+fi
+```
+
 Do not hardcode exit-code assumptions beyond zero-vs-nonzero; branch on that and read the
 structured output for the precise reason. When capturing a piped tool's exit through `tee`, use
 `${PIPESTATUS[0]}` — `$?` reports `tee`'s status, not the model CLI's.
@@ -1040,6 +1160,11 @@ structured output for the precise reason. When capturing a piped tool's exit thr
 | zcode: `无法定位 CLI ZCode Built-in Provider Config：…` | ZCode app 3.14.5 / CLI 0.16.9 ships the provider file at `Resources/config/provider/`, the CLI looks in `glm/provider/` | Use the symlink shim wrapper in the ZCode section; no app files need changing |
 | zcode `--attach clip.mp4`: the model says nothing came through | The CLI does not forward video to the model | Use the Coding Plan API `video_url` path or Gemini |
 | Grok cannot "see" a video file | `read_file` skips `mp4`/`mov` as binary; only Image content blocks are forwarded | No Grok video input; use Gemini |
+| Kimi reports no provider / not logged in | Native Kimi OAuth is absent or expired; OpenCode auth is unrelated | Run `kimi login` and complete the device-code flow; do not copy token files or log out of OpenCode/Z.AI |
+| Kimi rejects K3 with an entitlement error | The current membership tier does not expose native K3 | Report the exact error and let the user choose another native alias, e.g. `kimi-code/kimi-for-coding`; never silently substitute GLM or OpenCode Go |
+| Kimi `-p` modifies files during a review | Print mode uses `auto` permissions and cannot combine with `--plan` | Pass the diff/file text in the prompt; only grant repo access after static Kimi permission rules are suitable |
+| Kimi `-p` remains alive after the answer | Background tasks/subagents keep print mode alive by default | Bound the shell/tool call; if the user wants one-turn behavior, they may set `print_background_mode = "exit"` in their Kimi config |
+| Kimi works manually but automation is rejected/suspended | Kimi Code subscriptions are limited to personal interactive use | Keep native OAuth relays user-triggered; use metered Kimi Platform credentials for cron, batch, or services |
 | zcode: `Model config is missing. Create ~/.zcode/cli/config.json …` | No CLI config and no env vars | Apply Recipe A, B, or C above |
 | zcode config written but `model: Invalid input` in `~/.zcode/cli/log/` | `model.main` written as an object or bad ref | `model.main` must be a `provider/model` STRING, e.g. `"zai/glm-5.3"` |
 | `zcode login`: `OAuth response is not valid JSON` | Open Z.ai bug (feedback #51, #20) | Skip login; use Recipe A/B/C |
@@ -1051,5 +1176,5 @@ structured output for the precise reason. When capturing a piped tool's exit thr
 | agy modifies files you only wanted reviewed | Print mode runs tools unprompted (yolo-like) | Add `--mode plan` (advice-only) or `--sandbox` |
 | agy: `jetski: no output produced — a tool required the "mcp" permission …` | The prompt made agy reach for a tool that headless mode auto-denies (e.g. listing a directory) | Keep the prompt to the task (e.g. watch only `clip.mp4`) and rerun; do not reach for `--dangerously-skip-permissions` |
 | agy `-p` hangs forever inside a parallel multi-CLI burst | agy 1.1.0 timing/load bug when 3+ other model CLIs run concurrently (solo/pairwise reliable; stagger insufficient) | Run the Gemini lane sequentially around the burst; always cap agy with a timeout |
-| CLI missing or "not authenticated" | Not installed / logged out | Report it, skip that model; run `codex login` / `opencode auth login` / `grok login` as needed — do not substitute another model silently. Exception: Grok's "not authenticated" from `grok models` is not conclusive — walk the Grok availability ladder first |
+| CLI missing or "not authenticated" | Not installed / logged out | Report it, skip that model; run `codex login` / `opencode auth login` / `kimi login` / `grok login` as needed — do not substitute another model silently. Exception: Grok's "not authenticated" from `grok models` is not conclusive — walk the Grok availability ladder first |
 | Long run hangs the shell tool | Tool-level timeout | Set an explicit timeout, or run in background and poll |

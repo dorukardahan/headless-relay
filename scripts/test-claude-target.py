@@ -48,8 +48,10 @@ def contract(text):
         base = Path(tmp)
         bin_dir = base / "bin"
         bin_dir.mkdir()
+        # Resolve the active interpreter via PATH; a spaced path is invalid in a shebang.
+        (bin_dir / "python3").symlink_to(sys.executable)
         stub = bin_dir / "claude"
-        stub.write_text("#!" + sys.executable + "\nimport json, os, sys\nfrom pathlib import Path\nPath(os.environ['ARGV_RECEIPT']).write_text(json.dumps({'argv':sys.argv[1:], 'native_model':os.environ.get('ANTHROPIC_MODEL'), 'config_dir':os.environ.get('CLAUDE_CONFIG_DIR')}))\nsys.exit(int(os.environ.get('STUB_RC', '0')))\n")
+        stub.write_text("#!/usr/bin/env python3\nimport json, os, sys\nfrom pathlib import Path\nPath(os.environ['ARGV_RECEIPT']).write_text(json.dumps({'argv':sys.argv[1:], 'native_model':os.environ.get('ANTHROPIC_MODEL'), 'config_dir':os.environ.get('CLAUDE_CONFIG_DIR')}))\nsys.exit(int(os.environ.get('STUB_RC', '0')))\n")
         stub.chmod(0o700)
         # No jq is on PATH. A poison jq in separate runs detects parser dependence.
         poison = base / "poison"

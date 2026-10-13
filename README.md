@@ -9,8 +9,8 @@ tool in the background, reads the answer, and reports back to you. No new accoun
 juggling: it drives the AI tools you already have, with the logins you already use.
 
 It works in any coding agent that reads Agent Skills and can run shell commands: Claude
-Code, OpenAI Codex CLI, xAI Grok, Cursor, OpenClaw, Nous Research Hermes and friends. Five
-model lanes ship ready to use (GPT, GLM, Grok, Gemini, Claude), and you can plug in your
+Code, OpenAI Codex CLI, xAI Grok, Cursor, OpenClaw, Nous Research Hermes and friends.
+Six model lanes ship ready to use (GPT, GLM, Kimi K3, Grok, Gemini, Claude), and you can plug in your
 own, including local models running through Ollama, LM Studio, or Apple MLX. Installation
 is a single `git clone`; everything else on this page is detail for when you need it.
 
@@ -47,7 +47,7 @@ is a single `git clone`; everything else on this page is detail for when you nee
 ## What it can do
 
 - **Second opinions**: hand a diff, a bug, a PR review, or a design question to GPT, GLM,
-  Grok, Gemini, or Claude
+  Kimi K3, Grok, Gemini, or Claude
 - **Consensus**: send the same prompt to several models in parallel and compare answers
 - **Party / Council Mode**: explicitly ask every safely available built-in and custom lane the
   same canonical user brief, including independent native subagents for same-provider lanes;
@@ -65,6 +65,9 @@ is a single `git clone`; everything else on this page is detail for when you nee
   HOME + clean temp GROK_HOME, personal-scope auth)** (see the security note above and [SECURITY.md](SECURITY.md))
 - **Custom targets**: add any one-shot CLI as a lane (local models included) via a small
   JSON registry, contributed by [@AytuncYildizli](https://github.com/AytuncYildizli)
+
+The native Kimi lane was contributed by [@AytuncYildizli](https://github.com/AytuncYildizli).
+Its lifecycle/path guards are regression-tested with synthetic CLIs only.
 
 ## Pairs well with RePrompter
 
@@ -91,6 +94,9 @@ lives in `references/reprompter-relay.md`.
 | `scripts/print-model-catalog.sh` | Machine-local catalog: asks installed CLIs which model ids they serve *today*. Not a published menu. |
 | `scripts/catalog_watchdog.py` | Process-group watchdog used by the catalog (timeout / INT / TERM / HUP). After a normal CLI exit it does not `killpg` — that pgid could already be reused. Secrets stay out of argv. |
 | `scripts/regression-model-pins.sh` | Static tripwire: fails if docs teach `codex models` as a catalog (that starts a session on 0.144) |
+| `scripts/regression-kimi-target.sh` | Static tripwire for native Kimi routing/auth separation; not runtime proof |
+| `scripts/kimi_relay.py` | Kimi-only external watchdog, physical non-git cwd and empty skills; native CLI retains auth ownership |
+| `scripts/test-kimi-runtime.py` | Synthetic sh/bash lifecycle, path and argv regressions; no real Kimi/network |
 | `scripts/regression-claude-target.sh` / `scripts/test-claude-target.py` | Offline stdlib Python regression: executes the shipped Claude helper with an argv stub under sh/bash, synthetic settings/profiles, and missing/poisoned jq. Tests native delegation, opaque overrides (including printable `[1m]`), resume/error propagation, and negative mutations; no real Claude or network. |
 | `LICENSE.txt` | MIT license |
 
@@ -125,6 +131,12 @@ At least one target-model CLI installed and authenticated:
   updated separately from the OpenCode desktop app), and/or the ZCode desktop app (its bundled
   `zcode` command works headlessly after a one-time setup; app 3.14.5 also needs a small
   symlink shim, see `references/cli-reference.md`)
+- `kimi` (Kimi Code CLI) with its own Kimi Code device-code OAuth (`kimi login`). This login is
+  independent of OpenCode/Z.AI auth; the default relay model is Kimi K3 and can be overridden.
+  Requires Python 3/POSIX `waitid(WNOWAIT)` and an absolute `HEADLESS_RELAY_ROOT` pointing at the
+  whole installed skill directory. **Opt-in agentic lane, not a sandbox:** global MCP/hooks,
+  inherited environment, instructions and real-home session/log retention remain active.
+  Obtain consent before use; see the Kimi section in `SKILL.md`
 - `grok` (xAI Grok Build) with a SuperGrok login (or `XAI_API_KEY`). Note: the skill runs Grok
   under a hermetic `env -i` + empty `HOME` + a clean temp `GROK_HOME` with its tool use locked down — belt-and-suspenders now
   that xAI has open-sourced Grok Build and a source audit found the old whole-repo upload path gone.
