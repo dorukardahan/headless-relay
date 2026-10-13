@@ -116,11 +116,16 @@ agent's skills directory:
 | Nous Research Hermes | `~/.hermes/skills/headless-relay/` (also scans `~/.agents/skills/`) |
 | Cursor, ZCode, and other agentskills.io-compatible runtimes | check your agent's skills directory convention; the skill has no platform-specific syntax |
 
-Example:
+Stable release: [v3.2.0](https://github.com/dorukardahan/headless-relay/releases/tag/v3.2.0).
+See [CHANGELOG.md](CHANGELOG.md) for changes, verification and limitations.
+
+Example (pinned release, including all helper scripts):
 
 ```bash
-git clone https://github.com/dorukardahan/headless-relay.git ~/.claude/skills/headless-relay
+git clone --branch v3.2.0 --depth 1 https://github.com/dorukardahan/headless-relay.git ~/.claude/skills/headless-relay
 ```
+
+To track unreleased development instead, omit `--branch v3.2.0 --depth 1`.
 
 ## Requirements
 
