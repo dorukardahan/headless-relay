@@ -1,5 +1,21 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- Kimi relay on macOS: every run ended with `kimi-relay: refusing: [Errno 3] No such process`, which also hid Kimi's real exit status. macOS answers `getpgid` with ESRCH for an exited-but-unreaped leader and `killpg` with EPERM when that zombie is the only member left; the old code treated both as ownership loss. The relay now proves ownership with `waitid(P_PID, WNOWAIT)`, which only succeeds for its own unreaped child, and accepts EPERM only when `ps` shows no live member in the group. A live member it cannot signal still refuses.
+
+### Documentation and safety
+
+- Kimi preflight: the archived Python `kimi-cli` prints `kimi, version 1.x` and fails this lane with `Output format is only supported for print UI`; the Kimi Code CLI prints a bare version.
+- Kimi's free Adagio plan has no Kimi Code access, so native OAuth needs a paid membership; the metered Open Platform API key is the other login.
+- Kimi `auto` permissions are the "Never Ask" mode: sensitive-file access and dangerous commands are approved without asking. Only static deny rules still apply.
+
+### Verification
+
+- `scripts/test-kimi-runtime.py`: 22 tests pass on macOS 27 (Darwin), including 4 new tests that emulate the macOS answers on any POSIX host. Before the fix, 26 subtests failed on the same machine, and the 4 new tests fail against the old relay. The other regression scripts and the Grok runtime matrix (228 passed, 0 failed) still pass. No real Kimi inference was run.
+
 ## [3.2.0] - 2026-10-13
 
 This minor release includes the accumulated changes since v3.1.1.

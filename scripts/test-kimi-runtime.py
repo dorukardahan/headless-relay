@@ -10,6 +10,8 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
+import importlib.util
 
 ROOT = Path(__file__).resolve().parent.parent
 FAKE = '''#!/usr/bin/env python3
@@ -340,6 +342,70 @@ kimi_relay_file() { printf 'partial answer'; return "$KIMI_TEST_RC"; }
                 self.assertEqual(proc.returncode, 128 + sig, stderr.decode())
                 self.assertFalse(self.canary.exists())
                 self.assertFalse(Path(json.loads(self.record.read_text())['cwd']).exists())
+
+
+class DarwinProcessGroupSemantics(unittest.TestCase):
+    """Emulate macOS answers for an exited-but-unreaped leader on any POSIX host.
+
+    macOS reports ESRCH from getpgid() for such a zombie and EPERM from killpg()
+    when it is the only member left. Hosts that answer both normally never reach
+    these branches in the runtime tests above, so they are emulated here.
+    """
+
+    def setUp(self):
+        spec = importlib.util.spec_from_file_location('kimi_relay_under_test', ROOT / 'scripts/kimi_relay.py')
+        self.relay = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.relay)
+
+    def exited_unreaped_child(self, code):
+        proc = subprocess.Popen([sys.executable, '-c', f'raise SystemExit({code})'], start_new_session=True)
+        deadline = time.monotonic() + 5
+        while os.waitid(os.P_PID, proc.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT) is None:
+            self.assertLess(time.monotonic(), deadline, 'child did not exit')
+            time.sleep(.01)
+        return proc
+
+    def darwin_answers(self, members):
+        def getpgid(_pid):
+            raise ProcessLookupError(3, 'No such process')
+
+        def killpg(_pgid, _sig):
+            raise PermissionError(1, 'Operation not permitted')
+
+        return (mock.patch.object(self.relay.os, 'getpgid', getpgid),
+                mock.patch.object(self.relay.os, 'killpg', killpg),
+                mock.patch.object(self.relay, 'live_group_members', lambda _pgid: list(members)))
+
+    def test_zombie_only_group_returns_child_status(self):
+        proc = self.exited_unreaped_child(7)
+        a, b, c = self.darwin_answers([])
+        with a, b, c:
+            self.assertEqual(self.relay.cancel_owned_group(proc), 7)
+
+    def test_live_member_we_cannot_signal_still_refuses(self):
+        proc = self.exited_unreaped_child(0)
+        a, b, c = self.darwin_answers([proc.pid + 1])
+        try:
+            with a, b, c:
+                with self.assertRaises(PermissionError):
+                    self.relay.cancel_owned_group(proc)
+        finally:
+            proc.wait()
+
+    def test_reaped_leader_is_not_treated_as_owned(self):
+        proc = self.exited_unreaped_child(0)
+        proc.wait()
+        a, b, c = self.darwin_answers([])
+        with a, b, c:
+            self.assertFalse(self.relay.owns_group(proc.pid))
+            self.assertFalse(self.relay.leader_unreaped(proc.pid))
+
+    def test_live_group_members_skips_zombies(self):
+        proc = self.exited_unreaped_child(0)
+        try:
+            self.assertNotIn(proc.pid, self.relay.live_group_members(proc.pid))
+        finally:
+            proc.wait()
 
 
 if __name__ == '__main__':
