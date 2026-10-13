@@ -776,6 +776,13 @@ Assist Standard or Enterprise license, set `GOOGLE_CLOUD_PROJECT`. Its OAuth als
 login daily. Headless runs in an untrusted folder also need `--skip-trust` (or
 `GEMINI_CLI_TRUST_WORKSPACE=true`). API-key auth was not tested here.
 
+A Google AI Ultra subscription does not change this. On 2026-10-14 (Gemini CLI 0.64.0), a personal
+account with Ultra, which lists Gemini 4 Argon in agy, signed in and got the same
+`IneligibleTierError`: `UNSUPPORTED_CLIENT` for tier `free-tier` ("Gemini Code Assist for
+individuals"). For that first sign-in, the full-screen dialog showed "Authentication consent could
+not be obtained"; `gemini --skip-trust -p "…"` asked for browser consent on a plain `[Y/n]` line
+instead, so the Google sign-in went through before the tier check failed.
+
 | Flag | Meaning |
 |------|---------|
 | `-p, --print <PROMPT>` | Run a single prompt non-interactively, print the response, exit. `--prompt` is an alias. On 1.3.4 the prompt can also come from stdin when `-p` is omitted (`agy --model … < handoff.md`). `-p` with no value consumes the next flag as the prompt. |
@@ -784,7 +791,7 @@ login daily. Headless runs in an untrusted folder also need `--skip-trust` (or
 | `--input-format stream-json` | One NDJSON message per stdin line, one turn each; requires `--output-format stream-json`. |
 | `--print-timeout <dur>` | Print-mode wait cap. Default `0s` on 1.3.4 (wait until the turn completes; it was `5m0s` on 1.1.x), so always bound the call yourself. |
 | `--model <name>` | A model id or display string from `agy models`, e.g. `gemini-3.8-flash-high` or `"Gemini 3.8 Flash (High)"`. Omit to use the user's configured default. |
-| `--effort <level>` | `low\|medium\|high\|xhigh\|max`. Works only with a base model id: `--model gemini-3.8-flash --effort high`. With a display string such as `"Gemini 3.8 Flash (High)"` it fails with `--effort is not supported for model`, and `"Gemini 3.8 Flash"` without a tier suffix is not a valid model. |
+| `--effort <level>` | `low\|medium\|high\|xhigh\|max`. Works only with a base model id: `--model gemini-3.8-flash --effort high`. With a display string such as `"Gemini 3.8 Flash (High)"` it fails with `--effort is not supported for model`, and `"Gemini 3.8 Flash"` without a tier suffix is not a valid model. The levels depend on the model: Gemini 4 Argon takes only `low`, `medium` and `high`. |
 | `--add-dir <path>` | Add a directory to the workspace (repeatable) — it also BECOMES the working directory. Without it agy works in its own scratch dir, `~/.gemini/antigravity-cli/scratch`. |
 | `--mode <mode>` | `accept-edits`, `plan`. Use `plan` for advice-only runs. |
 | `--sandbox` | Enable terminal restrictions. |
@@ -800,6 +807,13 @@ and `"Gemini 3.1 Pro (High)"` now fails with "is not recognized as a known model
 announced Gemini 4 Argon on 2026-10-13 for the Antigravity app and CLI, for Google AI Ultra and
 eligible Gemini Enterprise subscriptions only; it was not in this non-Ultra account's menu. The
 non-Google models are served through Google's platform.
+
+After the same account moved to Google AI Ultra (2026-10-14), `agy models` also listed
+`gemini-4-argon-high|medium|low`, and print mode answered with `--model gemini-4-argon-high`,
+with `"Gemini 4 Argon (High)"` and with `--model gemini-4-argon --effort low|medium|high`.
+`--effort xhigh` and `max` fail before the run with `gemini-4-argon has no "xhigh" effort
+(available: low, medium, high)`; the JSON has `status: "ERROR"` and the message in `error`.
+Gemini 3.1 Pro was not in the Ultra menu either.
 
 Notes, all live-verified:
 - **Print mode auto-denies tools on 1.3.4.** A shell command, a file write and a URL read were

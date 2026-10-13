@@ -1017,6 +1017,7 @@ brand risks) is not the same as generating one. Live-tested 2026-10-09:
 | Target | Can it watch a local clip headlessly? |
 |--------|---------------------------------------|
 | Gemini (agy, `"Gemini 3.8 Flash (High)"`) | **YES** — ~1 frame/s plus an automatic speech transcript (no raw audio). The lane to use for talks, interviews, jokes, quotes |
+| Gemini (agy, `"Gemini 4 Argon (High)"`, Google AI Ultra / eligible Enterprise only) | **YES** — one 20 s test (2026-10-14, agy 1.3.4, the `watch_clip` flow with the model swapped): speech came back split by sentence, with start and end times within about 0.6 s of word-level STT cue times, where 3.8 Flash returned one block. It also listed five booth names that the frames at that timestamp do not show, so check on-screen text and names against the frames |
 | GLM-5.3-Flash | **Frames only, no speech**, and only through the Coding Plan API's `video_url` part. `opencode` lists the model as video-capable but its provider rejects video (and `run` exits 0 with empty output); `zcode --attach` forwards an empty placeholder |
 | Grok 4.7 | **NO** — `read_file` skips video as binary and the headless CLI forwards only image blocks |
 | GPT (Codex), Claude | Not tested |
