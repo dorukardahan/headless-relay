@@ -908,30 +908,70 @@ Three findings from bisecting the failure modes (codex-cli 0.144.0):
   even a non-ultra run may wander into the openai-docs skill.
 macOS has no `timeout`; wrap with `perl -e 'alarm shift; exec @ARGV' <secs> <cmd>` as above.
 
-### Gemini (agy) — native generate_image, works headless (image only)
+### Gemini (agy) — image generation through the image-generator subagent (image only)
 
-agy has a built-in `generate_image` tool. Like Grok's and Codex's media tools it is NOT a CLI
-flag (so it does not show in `agy models` / `agy --help`) — you drive it through the prompt.
-Verified 2026-07-10 on agy 1.1.0: a solo `agy -p` run generated an orange-triangle JPG into
-the target dir in ~34s. No API key and no OpenRouter needed — the Google-account login covers
-it (agy also self-reports the tool and offers a 0G Compute text-to-image route as an
-alternative). No native VIDEO tool (agy self-reports video is unsupported).
+**agy 1.3.x (verified 2026-10-14 on 1.3.4).** The 1.1.0 recipe further down no longer works.
+Asked to "call your generate_image tool", the root agent called no such tool (its own reasoning
+said the tool list had none), reached for a shell command instead, and print mode auto-denied
+it: exit 0, empty `response`, no image. What works is agy's built-in `image-generator`
+subagent:
+- The root agent calls `invoke_subagent` with that type. The subagent runs as a background
+  task, and stderr shows `root agent idle; waiting up to 30m0s for 1 background task(s)`.
+- The image lands in the run's own conversation folder,
+  `~/.gemini/antigravity-cli/brain/<conversation_id>/`, not in your directory; `--add-dir` did
+  not change that.
+- No `permissions.allow` rule and no `--dangerously-skip-permissions` were needed. The JPEGs
+  were 1024×1024, and a timed run took 82 s.
+
+Global rules can still break it. In print mode agy loads `~/.gemini/GEMINI.md` and its MCP
+servers. If those rules tell the model to call an MCP tool first (a memory server, for
+example), that call is auto-denied and the whole run ends empty, even though the subagent
+itself was allowed. The prompt below rules that out.
 
 ```bash
-cd /path/to/output-dir
-agy -p "Call your generate_image tool immediately — do not research, spawn subagents, or use a
-   skill. Generate a <description>. Save it to the current directory. Print exactly:
-   SAVED: <absolute path>." --model "Gemini 3.8 Flash (High)" --add-dir "$PWD" </dev/null
+# agy 1.3.x: images come from the built-in image-generator subagent and land in agy's own
+# conversation folder; copy one out only if the reported path is inside THIS run's folder
+agy_image() (   # usage: agy_image "description" OUTPUT-DIR   (exit 3 = no image)
+  W=$(mktemp -d "${TMPDIR:-/tmp}/agyimg.XXXXXX") && W=$(cd "$W" && pwd -P) || exit 1
+  trap 'rm -rf "$W"' EXIT
+  out=$(cd "$W" && perl -e 'alarm shift; exec @ARGV' 600 \
+    agy -p "Use your image-generator subagent now to generate $1. Do not call MCP or memory tools, and do not run shell commands. When done, print exactly: SAVED: <absolute path>." \
+    --model "Gemini 3.8 Flash (High)" --output-format json </dev/null)
+  rc=$?; [ "$rc" -eq 0 ] || exit "$rc"
+  cid=$(printf '%s' "$out" | jq -r '.conversation_id // empty')
+  src=$(printf '%s' "$out" | jq -r '.response // empty' | sed -n 's/^SAVED: //p' | tail -n 1)
+  case "$src" in
+    ''|*..*) echo "agy_image: no usable SAVED path; denied: $(printf '%s' "$out" | jq -c '.denied_actions')" >&2; exit 3 ;;
+    "$HOME/.gemini/antigravity-cli/brain/$cid/"*) ;;
+    *) echo "agy_image: path is outside this run's folder: $src" >&2; exit 3 ;;
+  esac
+  { [ -n "$cid" ] && [ -f "$src" ] && [ ! -L "$src" ]; } || { echo "agy_image: file missing" >&2; exit 3; }
+  cp "$src" "$2"/ && printf '%s\n' "$2/${src##*/}"
+)
+agy_image "a simple green square on a white background" /path/to/output-dir
 ```
 
-Caveat: run the image lane **solo / sequentially** — the agy parallel-burst hang
-(google-antigravity/antigravity-cli#573) applies to media runs too. `--add-dir "$PWD"` (or the
-repo path) makes agy write to your dir instead of its scratch workspace; close stdin
-(`</dev/null`) as with the text lane. An earlier "agy has no image tool" reading was wrong: it
-came from checking `agy models`/`--help` (which never list runtime tools) and from a
-concurrency-hung attempt in a parallel burst — solo, the native tool works. The OpenRouter
-`google/gemini-3-pro-image` path remains a separate, metered, operator-gated fallback, not a
-requirement.
+The model's `SAVED:` line is untrusted text, so the function copies a file only when the path
+sits inside the folder of this run's `conversation_id`, contains no `..`, and is a regular file
+rather than a symlink. Tested 2026-10-14: the function ran live in bash and zsh. An earlier
+script form with the same path checks ran against a stubbed `agy` in bash and `zsh -f`, covering
+an empty answer, a path outside the folder, a `..` path, a symlink and a missing
+`conversation_id`; each exited 3 without copying, and a valid path was copied.
+
+Run the image lane **solo / sequentially**: the agy parallel-burst hang
+(google-antigravity/antigravity-cli#573, seen on 1.1.0) applies to media runs too. No API key
+and no OpenRouter are needed; the Google-account login covers it. agy has no native VIDEO tool.
+The OpenRouter `google/gemini-3-pro-image` path remains a separate, metered, operator-gated
+fallback, not a requirement.
+
+**agy 1.1.0 (historical, verified 2026-07-10).** agy then had a `generate_image` tool that the
+root agent called directly. Like Grok's and Codex's media tools, it was not a CLI flag, so it
+never showed in `agy models` or `agy --help`. A solo run of
+`agy -p "Call your generate_image tool immediately — do not research, spawn subagents, or use a skill. Generate a <description>. Save it to the current directory. Print exactly: SAVED: <absolute path>." --model "Gemini 3.8 Flash (High)" --add-dir "$PWD" </dev/null`
+wrote an orange-triangle JPG into the target dir in ~34 s; `--add-dir "$PWD"` made agy write
+there. An even earlier "agy has no image tool" reading was wrong. It came from checking
+`agy models`/`--help`, which never list runtime tools, and from an attempt that hung in a
+parallel burst.
 
 ### GLM / Kimi / Claude
 
@@ -1230,7 +1270,8 @@ structured output for the precise reason. When capturing a piped tool's exit thr
 | agy exits 0 with empty output; stderr `jetski: no output produced — a tool required the "…" permission` | agy 1.3.x print mode auto-denies tools; JSON output lists `denied_actions` | Tell the model to answer in text without tools, or add a `permissions.allow` rule; treat empty output as a failed relay |
 | agy: `--effort is not supported for model "Gemini 3.8 Flash (High)"` | `--effort` only works with a base model id | Use `--model gemini-3.8-flash --effort high`, or keep the display string without `--effort` |
 | agy modifies files you only wanted reviewed | agy 1.1.x print mode ran tools unprompted (yolo-like); 1.3.x auto-denies them unless `permissions.allow` or `--dangerously-skip-permissions` allows them | Add `--mode plan` (advice-only) or `--sandbox`, and do not pass `--dangerously-skip-permissions` for reviews |
-| agy: `jetski: no output produced — a tool required the "mcp" permission …` | The prompt made agy reach for a tool that headless mode auto-denies (e.g. listing a directory) | Keep the prompt to the task (e.g. watch only `clip.mp4`) and rerun; do not reach for `--dangerously-skip-permissions` |
+| agy: `jetski: no output produced — a tool required the "mcp" permission …` | The prompt made agy reach for a tool that headless mode auto-denies (e.g. listing a directory), or a global rule in `~/.gemini/GEMINI.md` told the model to call an MCP tool first (seen 2026-10-14 with a memory server) | Keep the prompt to the task (e.g. watch only `clip.mp4`), add "do not call MCP or memory tools", and rerun; do not reach for `--dangerously-skip-permissions` |
+| agy image prompt ("call your generate_image tool") exits 0 with no image | agy 1.3.x: the root agent called no `generate_image` tool, made a shell call instead, and print mode denied it | Use `agy_image` (built-in image-generator subagent; the file is copied out of `~/.gemini/antigravity-cli/brain/<conversation_id>/` after a path check) |
 | agy `-p` hangs forever inside a parallel multi-CLI burst | agy 1.1.0 timing/load bug when 3+ other model CLIs run concurrently (solo/pairwise reliable; stagger insufficient) | Run the Gemini lane sequentially around the burst; always cap agy with a timeout |
 | CLI missing or "not authenticated" | Not installed / logged out | Report it, skip that model; run `codex login` / `opencode auth login` / `kimi login` / `grok login` as needed — do not substitute another model silently. Exception: Grok's "not authenticated" from `grok models` is not conclusive — walk the Grok availability ladder first |
 | Long run hangs the shell tool | Tool-level timeout | Set an explicit timeout, or run in background and poll |

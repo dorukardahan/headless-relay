@@ -15,11 +15,13 @@
 - The model menu is per account: 3.7/3.6 Flash and 3.1 Pro are gone from a personal account, and Gemini 4 Argon (announced 2026-10-13) is for Google AI Ultra and eligible Gemini Enterprise subscriptions only.
 - Gemini CLI wording corrected: it is still released, but its free individual tier rejects the CLI with `UNSUPPORTED_CLIENT`. It needs `GOOGLE_CLOUD_PROJECT` with a Code Assist Standard or Enterprise license, and `--skip-trust` for headless runs in untrusted folders.
 - Video timing limits: a 1-fps watching lane cannot judge sub-second subtitle timing. Use a speech-to-text API with word timestamps for that.
+- Gemini image recipe updated for agy 1.3.x: the 1.1.0 `generate_image` prompt now exits 0 with no image, because print mode denies the shell call the model makes instead. The new `agy_image` function uses agy's built-in image-generator subagent, which needs no permission rule. The image lands in agy's own conversation folder, and the function copies it out only after checking that the reported path is inside this run's folder. A global rule that triggers an MCP call (for example a memory server in `~/.gemini/GEMINI.md`) also ends a print run empty, so the prompt rules MCP calls out.
 
 ### Verification
 
 - `scripts/test-kimi-runtime.py`: 22 tests pass on macOS 27 (Darwin), including 4 new tests that emulate the macOS answers on any POSIX host. Before the fix, 26 subtests failed on the same machine, and the 4 new tests fail against the old relay. The other regression scripts and the Grok runtime matrix (228 passed, 0 failed) still pass. No real Kimi inference was run.
 - Live agy 1.3.4 runs on 2026-10-13: tool denial for a command, a file write and a URL read (exit 0, empty `response`, `denied_actions`); JSON and stdin prompts; `--effort` with an id and with a display string; the updated `watch_clip` in bash and zsh, including the empty-answer exit 3. The agy parallel-burst hang was not retested.
+- `agy_image` on agy 1.3.4 (2026-10-14): live in bash and zsh, 1024×1024 JPEGs copied out; the path checks in an earlier script form ran against a stubbed `agy` in bash and `zsh -f` (empty answer, outside path, `..`, symlink, missing `conversation_id` → exit 3, nothing copied).
 
 ## [3.2.0] - 2026-10-13
 

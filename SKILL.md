@@ -934,10 +934,11 @@ Gemini (agy) generate them with no whole-repo bundle (still cloud models that tr
 read); Grok can too, via `grok_media`.
 **Video**: only Grok has it (`image_to_video`, `reference_to_video`), so video means a `grok_media`
 call. The pattern: tell the model to call its image tool IMMEDIATELY, save to the working
-directory, print the path, then read it back.
+directory, print the path, then read it back. agy 1.3.x is the exception: it uses a subagent and
+its own conversation folder (see the agy block below).
 
-Codex and agy do NOT bundle the repo (wire-verified), so they may write straight into your output
-directory:
+Codex and agy do NOT bundle the repo (wire-verified). Codex writes straight into your output
+directory; agy 1.3.x writes into its own conversation folder, and `agy_image` copies the file out:
 
 ```bash
 # GPT (Codex): built-in image_gen. Two reliability rules (see reference for the why):
@@ -953,10 +954,30 @@ perl -e 'alarm shift; exec @ARGV' 480 \
   codex exec --sandbox workspace-write -c model="gpt-5.6-sol" \
   -c model_reasoning_effort="max" "$(cat /tmp/img-brief.md)" </dev/null
 
-# Gemini (agy): native generate_image tool, works headless. Run it SOLO (the agy parallel-burst
-# hang applies to media too); the Google-account login covers it — no API key, no OpenRouter.
-cd /path/to/output-dir
-agy -p "$(cat /tmp/img-brief.md)" --model "Gemini 3.8 Flash (High)" --add-dir "$PWD" </dev/null
+# Gemini (agy 1.3.x): the 1.1.0 generate_image prompt now ends empty (print mode denies the shell
+# call the model makes instead). Run agy_image SOLO (the agy parallel-burst hang applies to media
+# too). The Google-account login covers it: no API key, no OpenRouter. Verified 2026-10-14 on
+# agy 1.3.4 (details in references/cli-reference.md).
+# agy 1.3.x: images come from the built-in image-generator subagent and land in agy's own
+# conversation folder; copy one out only if the reported path is inside THIS run's folder
+agy_image() (   # usage: agy_image "description" OUTPUT-DIR   (exit 3 = no image)
+  W=$(mktemp -d "${TMPDIR:-/tmp}/agyimg.XXXXXX") && W=$(cd "$W" && pwd -P) || exit 1
+  trap 'rm -rf "$W"' EXIT
+  out=$(cd "$W" && perl -e 'alarm shift; exec @ARGV' 600 \
+    agy -p "Use your image-generator subagent now to generate $1. Do not call MCP or memory tools, and do not run shell commands. When done, print exactly: SAVED: <absolute path>." \
+    --model "Gemini 3.8 Flash (High)" --output-format json </dev/null)
+  rc=$?; [ "$rc" -eq 0 ] || exit "$rc"
+  cid=$(printf '%s' "$out" | jq -r '.conversation_id // empty')
+  src=$(printf '%s' "$out" | jq -r '.response // empty' | sed -n 's/^SAVED: //p' | tail -n 1)
+  case "$src" in
+    ''|*..*) echo "agy_image: no usable SAVED path; denied: $(printf '%s' "$out" | jq -c '.denied_actions')" >&2; exit 3 ;;
+    "$HOME/.gemini/antigravity-cli/brain/$cid/"*) ;;
+    *) echo "agy_image: path is outside this run's folder: $src" >&2; exit 3 ;;
+  esac
+  { [ -n "$cid" ] && [ -f "$src" ] && [ ! -L "$src" ]; } || { echo "agy_image: file missing" >&2; exit 3; }
+  cp "$src" "$2"/ && printf '%s\n' "$2/${src##*/}"
+)
+agy_image "a simple green square on a white background" /path/to/output-dir
 ```
 
 Grok media (image or video) goes through the `grok_media` helper (define it once, see the Grok
@@ -972,9 +993,11 @@ publishes only this call's artifacts into your output dir (collision-safe, rolle
 grok_media /tmp/img-brief.md /path/to/output-dir
 ```
 
-Briefs must say: "call your image tool immediately — do NOT research docs, spawn subagents, or
-use any skill — generate <description>, save to the current directory, print `SAVED: <path>`."
-Tool names differ: Grok/Codex = `image_gen`, agy = `generate_image`. Codex also mirrors outputs
+Codex and Grok briefs must say: "call your image tool immediately — do NOT research docs, spawn
+subagents, or use any skill — generate <description>, save to the current directory, print
+`SAVED: <path>`." `agy_image` writes its own prompt, which asks for the image-generator subagent
+and rules out MCP and shell calls. Tool names differ: Grok/Codex = `image_gen`; agy 1.1.0 had
+`generate_image`, and agy 1.3.x uses the `image-generator` subagent. Codex also mirrors outputs
 to `~/.codex/generated_images/<session>/`.
 
 Per-target support (detail in [references/cli-reference.md](references/cli-reference.md)):
@@ -982,7 +1005,7 @@ Per-target support (detail in [references/cli-reference.md](references/cli-refer
 | Target | Headless media generation |
 |--------|---------------------------|
 | GPT (Codex) | YES — built-in `image_gen` via `codex exec`; avoid `ultra` (auto-delegation spiral, `max` works in ~55s), close stdin (`</dev/null`), direct "call the tool now" prompt (verified: blue-circle + green-square PNGs). No whole-repo bundle (still a cloud image API) |
-| Gemini (agy) | YES (image only) — native `generate_image`, no API key / no OpenRouter (Google login covers it), ~34s, writes to cwd (verified: orange-triangle JPG). Run SOLO — the agy parallel-burst hang applies. No native video tool. No whole-repo bundle (still a cloud image API) |
+| Gemini (agy) | YES (image only) — agy 1.3.x: built-in `image-generator` subagent through `agy_image`; the 1.1.0 `generate_image` prompt now ends empty. No API key / no OpenRouter (Google login covers it), ~80 s. The file lands in `~/.gemini/antigravity-cli/brain/<conversation_id>/` and `agy_image` copies it out after a path check (verified 2026-10-14 on 1.3.4: 1024×1024 JPEGs). Run SOLO — the agy parallel-burst hang applies. No native video tool. No whole-repo bundle (still a cloud image API) |
 | Grok | YES — `image_gen` / `image_edit` / `image_to_video` / `reference_to_video`, Imagine backend; the ONLY lane with video. Run via **`grok_media`** (hermetic `env -i` + empty HOME + clean temp GROK_HOME; allow-lists ONLY the 4 media tools with `--tools` — `--deny '*'` would block image_gen — binary-observed on 0.2.101). grok runs in an empty non-git dir; image_gen writes under the temp GROK_HOME, and the helper publishes the artifact into your output dir by copying it to a temp there and atomically hard-linking it to a free name (no-clobber, no-follow; a no-hardlink fs and newline-in-name both **fail closed**; rolls back only this call's own files on failure and never removes the output dir). The answer/manifest live in a separate control base grok is never given a path to |
 | GLM / Kimi / Claude | No headless image generation in these CLIs |
 
@@ -1114,6 +1137,8 @@ while a same-provider second opinion should stay in-session as a subagent.
 | agy reads/writes files in `~/.gemini/antigravity-cli/scratch` instead of your repo | Antigravity's default working dir is its own scratch workspace — pass `--add-dir /path/to/repo` (it becomes the working directory) |
 | agy: `flag needs an argument: -print` | `-p` needs its value: use `agy -p "$(cat /tmp/handoff.md)"`, or on agy 1.3.x omit `-p` and pipe the file on stdin |
 | agy exits 0 with empty output; stderr `jetski: no output produced — a tool required the "…" permission` | agy 1.3.x print mode auto-denies tools (shell, file write, URL read, MCP). Tell the model to answer in text without tools, or allow that tool in agy's settings.json; treat empty output as a failed relay |
+| agy image prompt ("call your generate_image tool") exits 0 with no image | agy 1.3.x: the root agent makes a shell call instead, and print mode denies it. Use `agy_image` (Scenario H), which asks for the built-in image-generator subagent and copies the file out of agy's conversation folder |
+| agy run ends empty with a denied "mcp" action you never asked for | agy loads `~/.gemini/GEMINI.md` and its MCP servers in print mode; a rule that says "call this MCP tool first" (e.g. a memory server) gets auto-denied and ends the run. Add "do not call MCP or memory tools" to the prompt |
 | agy `-p` never returns when launched inside a parallel multi-CLI burst | Known agy 1.1.0 timing bug (solo/pairwise runs are reliable) — run the Gemini lane sequentially around the burst, and always cap it with a timeout |
 | GLM cites a CI/workflow/env change not in the diff | Known GLM infra-hallucination — verify against the actual file before acting |
 | A CLI is missing or unauthenticated | Report it and skip that model; do not substitute another silently |
