@@ -1072,6 +1072,8 @@ perl -e 'alarm shift; exec @ARGV' 480 \
 # agy 1.3.x: images come from the built-in image-generator subagent and land in agy's own
 # conversation folder; copy one out only if the reported path, symlinks resolved, is inside THIS run's folder,
 # and never over an existing file (exit 4 if the name is taken)
+# Known limit: OUTPUT-DIR is opened again after the run, so use a folder that no other process
+# renames or replaces while agy is generating.
 agy_image() (   # usage: agy_image "description" OUTPUT-DIR   (exit 3 = no image, 4 = not saved: name taken)
   command -v jq >/dev/null 2>&1 || { echo "agy_image: needs jq to read agy's JSON" >&2; exit 2; }
   [ -d "$2" ] || { echo "agy_image: OUTPUT-DIR is not a directory: $2" >&2; exit 2; }
