@@ -836,28 +836,92 @@ Notes, all live-verified:
   matrix: github.com/google-antigravity/antigravity-cli/issues/573.
 - **Bound every run with `agy_run`.** agy is a Go binary, and Go programs ignore SIGALRM, so the
   usual macOS `perl -e 'alarm …; exec agy …'` wrapper does not stop it: a 3 s alarm let a 60 s
-  run finish with exit 0 (1.3.4, 2026-10-14). `agy_run` runs agy in its own process group,
-  sends the whole group TERM, then KILL, and exits 124.
+  run finish with exit 0 (1.3.4, 2026-10-14). `agy_run` runs agy in a process group led by a
+  keeper process, sends the group TERM, then KILL, and exits 124. It needs `python3` 3.9 or newer;
+  it does not use `waitid`, which the macOS system Python 3.9 lacks.
   The `agy_image` and `watch_clip` recipes below use it.
 
 ```bash
-# agy_run SECS AGY-ARGS...: run agy with a real deadline (exit 124 on timeout). agy is a Go binary
-# and ignores SIGALRM, so `perl -e 'alarm …; exec agy …'` does not stop it. agy runs in its own
-# process group; at the deadline, on INT/TERM/HUP, or when agy exits and leaves children behind,
-# the whole group gets TERM, then KILL 2 s later, so no child keeps the output pipe open.
-# agy's --print-timeout exits 0 with partial output, so it is not a bound.
+# agy_run SECS AGY-ARGS...: run agy with a real deadline (exit 124 on timeout, 130 on INT/TERM/HUP).
+# agy is a Go binary and ignores SIGALRM, so `perl -e 'alarm …; exec agy …'` does not stop it, and
+# its --print-timeout exits 0 with partial output. agy runs in a process group led by a small keeper
+# process. At the deadline, on a signal, or when agy exits and leaves children behind, the group gets
+# TERM, then KILL 2 s later, so no child keeps the output pipe open. The keeper is reaped only after
+# that cleanup, so the group id cannot be reused while it is being signalled (no waitid needed).
 agy_run() (
   t=$1; shift
-  perl -e '$t = shift; $p = fork; defined $p or die "agy_run: fork: $!\n";
-    if (!$p) { setpgrp(0, 0); exec @ARGV or exit 127 }
-    sub stop { my $r = shift; kill "TERM", -$p;   # $r: agy itself is already reaped
-      for (1 .. 20) { $r ||= waitpid($p, 1) > 0; last if $r && !kill(0, -$p); select undef, undef, undef, 0.1 }
-      kill "KILL", -$p if kill 0, -$p; waitpid($p, 0) unless $r }
-    $SIG{ALRM} = sub { stop(0); exit 124 };
-    $SIG{$_} = sub { stop(0); exit 130 } for qw(INT TERM HUP);
-    alarm $t; waitpid($p, 0); $rc = $? & 127 ? 128 + ($? & 127) : $? >> 8; alarm 0;
-    stop(1) if kill 0, -$p;   # a child left behind after agy exits would hold the pipe
-    exit $rc' "$t" agy "$@"
+  python3 -I -c '
+import os, select, signal, subprocess, sys, time
+t, cmd = float(sys.argv[1]), sys.argv[2:]
+SIGS = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
+r, w = os.pipe()
+k = os.fork()
+if k == 0:  # keeper: leads the group, reports agy exit status, waits to be killed
+    os.setpgid(0, 0)
+    for s in SIGS:
+        signal.signal(s, signal.SIG_IGN)
+    os.close(r)
+    a = os.fork()
+    if a == 0:
+        for s in SIGS:
+            signal.signal(s, signal.SIG_DFL)
+        os.close(w)
+        try:
+            os.execvp(cmd[0], cmd)
+        except OSError as e:
+            print("agy_run: %s" % e, file=sys.stderr)
+        os._exit(127)
+    null = os.open(os.devnull, os.O_RDWR)
+    for fd in (0, 1, 2):
+        os.dup2(null, fd)  # the keeper must not hold the output pipe open
+    os.write(w, str(os.waitstatus_to_exitcode(os.waitpid(a, 0)[1])).encode())
+    os.close(w)
+    while True:
+        signal.pause()
+os.close(w)
+try:
+    os.setpgid(k, k)
+except OSError:
+    pass
+stop = []
+for s in SIGS:
+    signal.signal(s, lambda n, f: stop.append(130))
+def live():  # group members other than the keeper that are not zombies
+    ps = subprocess.run(["ps", "-A", "-o", "pid=,pgid=,stat="], capture_output=True, text=True).stdout
+    return any(f[1] == str(k) and f[0] != str(k) and not f[2].startswith("Z")
+               for f in (l.split() for l in ps.splitlines()) if len(f) > 2)
+def finish(rc):  # the keeper is still unreaped here, so the group id is still ours
+    for sig, wait in ((signal.SIGTERM, 2), (signal.SIGKILL, 1)):
+        if not live():
+            break
+        try:
+            os.killpg(k, sig)
+        except OSError:
+            pass
+        end = time.time() + wait
+        while time.time() < end and live():
+            time.sleep(0.1)
+    try:
+        os.kill(k, signal.SIGKILL)
+    except OSError:
+        pass
+    os.waitpid(k, 0)
+    sys.exit(rc)
+end, data = time.time() + t, b""
+while True:
+    if stop:
+        finish(stop[0])
+    left = end - time.time()
+    if left <= 0:
+        finish(124)
+    if select.select([r], [], [], min(left, 0.2))[0]:
+        chunk = os.read(r, 64)
+        if not chunk:
+            break
+        data += chunk
+rc = int(data) if data.strip().lstrip(b"-").isdigit() else 1
+finish(rc if rc >= 0 else 128 - rc)
+' "$t" agy "$@"
 )
 ```
 - Baseline latency ~3-15s for a trivial prompt on 1.3.4, depending on the reasoning tier; each
