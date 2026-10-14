@@ -761,16 +761,37 @@ always wrong.
 
 ## Gemini via Antigravity — agy print mode
 
-Google retired the standalone Gemini CLI; its replacement is the Antigravity CLI, `agy`
-(install: `curl -fsSL https://antigravity.google/cli/install.sh | bash`; the old `gemini`
-binary may linger on PATH — do not use it). Auth comes from the Antigravity app/CLI Google
-login. All behavior below live-verified 2026-07-08 on agy 1.1.0.
+The Antigravity CLI, `agy`, is the default Gemini lane (install:
+`curl -fsSL https://antigravity.google/cli/install.sh | bash`). Auth comes from the Antigravity
+app/CLI Google login. First verified 2026-07-08 on agy 1.1.0; re-verified 2026-10-13 on agy 1.3.4,
+where print mode changed in three ways: it now auto-denies tools, it has JSON output, and it reads
+the prompt from stdin.
+
+The standalone Gemini CLI (`gemini`, `google-gemini/gemini-cli`) is still released, but it is not
+a drop-in lane for personal Google accounts. Its source (0.62.0, `code_assist/setup.ts`) puts a
+Google login without `GOOGLE_CLOUD_PROJECT` on the free "Gemini Code Assist for individuals" tier,
+and that tier now rejects the CLI with `UNSUPPORTED_CLIENT`. With a Cloud project that has a Code
+Assist Standard or Enterprise license, set `GOOGLE_CLOUD_PROJECT`. Its OAuth also asks for the
+`cloud-platform` scope, so organisations with Google Cloud session controls can expire the
+login daily. Headless runs in an untrusted folder also need `--skip-trust` (or
+`GEMINI_CLI_TRUST_WORKSPACE=true`). API-key auth was not tested here.
+
+A Google AI Ultra subscription does not change this. On 2026-10-14 (Gemini CLI 0.64.0), a personal
+account with Ultra, which lists Gemini 4 Argon in agy, signed in and got the same
+`IneligibleTierError`: `UNSUPPORTED_CLIENT` for tier `free-tier` ("Gemini Code Assist for
+individuals"). For that first sign-in, the full-screen dialog showed "Authentication consent could
+not be obtained"; `gemini --skip-trust -p "…"` asked for browser consent on a plain `[Y/n]` line
+instead, so the Google sign-in went through before the tier check failed.
 
 | Flag | Meaning |
 |------|---------|
-| `-p, --print <PROMPT>` | Run a single prompt non-interactively, print the response, exit. `--prompt` is an alias. |
-| `--print-timeout <dur>` | Print-mode wait cap, default `5m0s`. |
-| `--model <name>` | Display-string model name from `agy models`, e.g. `"Gemini 3.8 Flash (High)"`. Omit to use the user's configured default. |
+| `-p, --print <PROMPT>` | Run a single prompt non-interactively, print the response, exit. `--prompt` is an alias. On 1.3.4 the prompt can also come from stdin when `-p` is omitted (`agy --model … < handoff.md`). `-p` with no value consumes the next flag as the prompt. |
+| `--output-format <fmt>` | `text` (default), `json`, `stream-json`. JSON keys: `conversation_id`, `status`, `response`, `error`, `duration_seconds`, `num_turns`, `usage`, plus `denied_actions` when a tool was refused. |
+| `--json-schema <schema\|file>` | Enforce structured output (for `stream-json`, only on the final result). |
+| `--input-format stream-json` | One NDJSON message per stdin line, one turn each; requires `--output-format stream-json`. |
+| `--print-timeout <dur>` | Print-mode wait cap. Default `0s` on 1.3.4 (wait until the turn completes; it was `5m0s` on 1.1.x), so always bound the call yourself. When it fires, agy prints `print timeout after … returning partial output` on stderr and still exits 0 (an empty `response` in JSON), so it is not a failure signal; bound the run with `agy_run` instead. |
+| `--model <name>` | A model id or display string from `agy models`, e.g. `gemini-3.8-flash-high` or `"Gemini 3.8 Flash (High)"`. Omit to use the user's configured default. |
+| `--effort <level>` | `low\|medium\|high\|xhigh\|max`. Works only with a base model id: `--model gemini-3.8-flash --effort high`. With a display string such as `"Gemini 3.8 Flash (High)"` it fails with `--effort is not supported for model`, and `"Gemini 3.8 Flash"` without a tier suffix is not a valid model. The levels depend on the model: Gemini 4 Argon takes only `low`, `medium` and `high`. |
 | `--add-dir <path>` | Add a directory to the workspace (repeatable) — it also BECOMES the working directory. Without it agy works in its own scratch dir, `~/.gemini/antigravity-cli/scratch`. |
 | `--mode <mode>` | `accept-edits`, `plan`. Use `plan` for advice-only runs. |
 | `--sandbox` | Enable terminal restrictions. |
@@ -778,31 +799,144 @@ login. All behavior below live-verified 2026-07-08 on agy 1.1.0.
 | `-c, --continue` / `--conversation <id>` | Resume the most recent conversation / a specific one. |
 | `-i, --prompt-interactive` | Run a prompt then stay interactive — NOT headless; avoid in scripts. |
 
-Model menu (`agy models`, 2026-09-21 on agy 1.1.1): Gemini 3.8 Flash (Low/Medium/High),
-Gemini 3.7 Flash, Gemini 3.6 Flash, Gemini 3.1 Pro (Low/High), Claude Sonnet 4.6 (Thinking),
-Claude Opus 4.6 (Thinking), GPT-OSS 120B (Medium) —
-the non-Google models are served through Google's platform. The reasoning tier is baked into
-the model name; `"Gemini 3.8 Flash (High)"` is the current top Gemini Flash tier on this
-CLI (Pro remains available as `"Gemini 3.1 Pro (High)"`).
+The model menu depends on the account and can change between checks, so run `agy models` on the
+account you will use. On 2026-10-13 (agy 1.3.4, personal Google account) it listed
+`gemini-3.8-flash-high|medium|low`, `claude-sonnet-4-6`, `claude-opus-4-6-thinking` and
+`gpt-oss-120b-medium`. Gemini 3.7 Flash, 3.6 Flash and 3.1 Pro, listed on 2026-09-21, were gone,
+and `"Gemini 3.1 Pro (High)"` now fails with "is not recognized as a known model". Google
+announced Gemini 4 Argon on 2026-10-13 for the Antigravity app and CLI, for Google AI Ultra and
+eligible Gemini Enterprise subscriptions only; it was not in this non-Ultra account's menu. The
+non-Google models are served through Google's platform.
+
+After the same account moved to Google AI Ultra (2026-10-14), `agy models` also listed
+`gemini-4-argon-high|medium|low`, and print mode answered with `--model gemini-4-argon-high`,
+with `"Gemini 4 Argon (High)"` and with `--model gemini-4-argon --effort low|medium|high`.
+`--effort xhigh` and `max` fail before the run with `gemini-4-argon has no "xhigh" effort
+(available: low, medium, high)`; the JSON has `status: "ERROR"` and the message in `error`.
+Gemini 3.1 Pro was not in the Ultra menu either.
 
 Notes, all live-verified:
+- **Print mode auto-denies tools on 1.3.4.** A shell command, a file write and a URL read were
+  each refused because "headless mode cannot prompt". The run still **exits 0** with
+  `status: "SUCCESS"` and an **empty** `response`. stderr says `jetski: no output produced — a
+  tool required the "command" permission…`, and JSON lists `denied_actions`. Treat an empty answer
+  or any `denied_actions` entry as a failed relay. For text relays, say in the prompt that the
+  model must not run shell commands, call MCP tools or create files, and must answer in text.
+  To allow a tool, add a `permissions.allow` rule in agy's settings.json, or pass
+  `--dangerously-skip-permissions` only with the user's explicit opt-in. On 1.1.0 the same tools
+  ran unprompted (a file write, `curl` and authenticated `gh` all ran), so check the version.
 - **The old Gemini CLI's per-user API concurrency cap is gone**: three parallel `agy -p` runs
-  completed in 8s wall clock — identical to a single run.
+  completed in 8s wall clock — identical to a single run (1.1.0).
 - **BUT do not launch agy inside a parallel burst with other model CLIs.** Bisected over 19
   live runs (2026-07-09): `agy -p` hangs indefinitely (9/9) when started alongside 3+ other
   concurrent CLIs (codex/opencode/grok) whose lanes run for more than a few seconds; solo and
   pairwise runs pass 100%, and a 5s stagger does not help. Timing/load-sensitive bug in agy
-  1.1.0 — run the Gemini lane sequentially (before or after the burst), cap it with a timeout,
-  and retest on future agy releases. Reported upstream with the full repro matrix:
-  github.com/google-antigravity/antigravity-cli/issues/573.
-- Baseline latency ~8s for a trivial prompt; agentic runs (tool calls) ~20s.
-- No stdin pipe (`flag needs an argument: -print`) — pass files as `agy -p "$(cat file)"`.
-- No JSON output format; stdout is plain text.
-- Print mode executes shell/file/network tools WITHOUT prompting (file write, `curl` (200),
-  and authenticated `gh` all ran unprompted) — treat it like a yolo mode. Constrain with
-  `--mode plan` or `--sandbox` for advice-only handoffs.
+  1.1.0, not retested on 1.3.4 — run the Gemini lane sequentially (before or after the burst),
+  cap it with a timeout, and retest on future agy releases. Reported upstream with the full repro
+  matrix: github.com/google-antigravity/antigravity-cli/issues/573.
+- **Bound every run with `agy_run`.** agy is a Go binary, and Go programs ignore SIGALRM, so the
+  usual macOS `perl -e 'alarm …; exec agy …'` wrapper does not stop it: a 3 s alarm let a 60 s
+  run finish with exit 0 (1.3.4, 2026-10-14). `agy_run` runs agy in a process group led by a
+  keeper process, sends the group TERM, then KILL, and exits 124. It needs `python3` 3.9 or newer;
+  it does not use `waitid`, which the macOS system Python 3.9 lacks.
+  The `agy_image` and `watch_clip` recipes below use it.
+
+```bash
+# agy_run SECS AGY-ARGS...: run agy with a real deadline (exit 124 on timeout, 130 on INT/TERM/HUP).
+# agy is a Go binary and ignores SIGALRM, so `perl -e 'alarm …; exec agy …'` does not stop it, and
+# its --print-timeout exits 0 with partial output. agy runs in a process group led by a small keeper
+# process. At the deadline, on a signal, or when agy exits and leaves children behind, the group gets
+# TERM, then KILL 2 s later, so no child keeps the output pipe open. The keeper is reaped only after
+# that cleanup, so the group id cannot be reused while it is being signalled (no waitid needed).
+agy_run() (
+  t=$1; shift
+  python3 -I -c '
+import os, select, shutil, signal, subprocess, sys, time
+t, cmd = float(sys.argv[1]), sys.argv[2:]
+SIGS = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
+signal.signal(signal.SIGCHLD, signal.SIG_DFL)  # an inherited SIG_IGN would auto-reap the children
+PS = shutil.which("ps", path=os.defpath) or "/bin/ps"  # the system ps, not one from PATH
+stop = []  # handlers go in before any child exists, so no signal can skip the cleanup
+for s in SIGS:
+    signal.signal(s, lambda n, f: stop.append(130))
+r, w = os.pipe()
+k = os.fork()
+if k == 0:  # keeper: leads the group, reports agy exit status, waits to be killed
+    os.setpgid(0, 0)
+    for s in SIGS:
+        signal.signal(s, signal.SIG_IGN)
+    os.close(r)
+    a = os.fork()
+    if a == 0:
+        for s in SIGS:
+            signal.signal(s, signal.SIG_DFL)
+        os.close(w)
+        try:
+            os.execvp(cmd[0], cmd)
+        except OSError as e:
+            print("agy_run: %s" % e, file=sys.stderr)
+        os._exit(127)
+    null = os.open(os.devnull, os.O_RDWR)
+    for fd in (0, 1, 2):
+        os.dup2(null, fd)  # the keeper must not hold the output pipe open
+    os.write(w, str(os.waitstatus_to_exitcode(os.waitpid(a, 0)[1])).encode())
+    os.close(w)
+    while True:
+        signal.pause()
+os.close(w)
+try:
+    os.setpgid(k, k)
+except OSError:
+    pass
+def live():  # group members other than the keeper that are not zombies
+    try:
+        res = subprocess.run([PS, "-A", "-o", "pid=,pgid=,stat="], stdin=subprocess.DEVNULL,
+                             capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        return True  # cannot tell: assume members are left, so the group still gets TERM and KILL
+    if res.returncode != 0:
+        return True
+    ps = res.stdout
+    return any(f[1] == str(k) and f[0] != str(k) and not f[2].startswith("Z")
+               for f in (l.split() for l in ps.splitlines()) if len(f) > 2)
+def finish(rc):  # the keeper is still unreaped here, so the group id is still ours
+    for sig, wait in ((signal.SIGTERM, 2), (signal.SIGKILL, 1)):
+        if not live():
+            break
+        try:
+            os.killpg(k, sig)
+        except OSError:
+            pass
+        end = time.monotonic() + wait
+        while time.monotonic() < end and live():
+            time.sleep(0.1)
+    try:
+        os.kill(k, signal.SIGKILL)
+        os.waitpid(k, 0)
+    except OSError:
+        pass
+    sys.exit(stop[0] if stop else rc)  # a signal during cleanup still counts
+end, data = time.monotonic() + t, b""
+while True:
+    if stop:
+        finish(stop[0])
+    left = end - time.monotonic()
+    if left <= 0:
+        finish(124)
+    if select.select([r], [], [], min(left, 0.2))[0]:
+        chunk = os.read(r, 64)
+        if not chunk:
+            break
+        data += chunk
+rc = int(data) if data.strip().lstrip(b"-").isdigit() else 1
+finish(rc if rc >= 0 else 128 - rc)
+' "$t" agy "$@"
+)
+```
+- Baseline latency ~3-15s for a trivial prompt on 1.3.4, depending on the reasoning tier; each
+  call carries about 17K input tokens of agy's own context.
 - Working-directory gotcha: file operations land in the scratch workspace unless you pass
-  `--add-dir /path/to/repo`; reads of absolute paths outside the workspace worked.
+  `--add-dir /path/to/repo`; reads of absolute paths outside the workspace worked (1.1.0).
 
 ## Media generation (image / video)
 
@@ -850,8 +984,11 @@ where the brief instructs: "Use your `image_gen` tool to generate <description>.
 in the current working directory. Print the saved absolute path on its own line prefixed with
 `SAVED:`. If you have no image tool, print `IMAGE TOOL: NONE`." `--disable-web-search` does NOT
 disable the media tools — the `--tools` allow-list is the safeguard, not that flag.
-For image-only work, Codex or agy (below) need no such helper — neither has a global-rule-leak or
-data-egress history, so they write straight into your output dir. Live-verified on 0.2.101:
+For image-only work, Codex needs no such helper: it has no global-rule-leak or data-egress
+history and writes straight into your output dir. agy (below) has the same clean record, but on
+1.3.x the image lands in agy's own conversation folder, so use `agy_image`, which copies it out
+after its path and no-clobber checks (agy 1.1.0 wrote into the `--add-dir` folder).
+Live-verified on 0.2.101:
 `image_gen` runs under `grok_media`'s empty non-git CWD + clean temp `GROK_HOME` with a `--tools`
 allow-list of only the four media tools (a blanket `--deny '*'` blocks `image_gen`).
 
@@ -887,30 +1024,118 @@ Three findings from bisecting the failure modes (codex-cli 0.144.0):
   even a non-ultra run may wander into the openai-docs skill.
 macOS has no `timeout`; wrap with `perl -e 'alarm shift; exec @ARGV' <secs> <cmd>` as above.
 
-### Gemini (agy) — native generate_image, works headless (image only)
+### Gemini (agy) — image generation through the image-generator subagent (image only)
 
-agy has a built-in `generate_image` tool. Like Grok's and Codex's media tools it is NOT a CLI
-flag (so it does not show in `agy models` / `agy --help`) — you drive it through the prompt.
-Verified 2026-07-10 on agy 1.1.0: a solo `agy -p` run generated an orange-triangle JPG into
-the target dir in ~34s. No API key and no OpenRouter needed — the Google-account login covers
-it (agy also self-reports the tool and offers a 0G Compute text-to-image route as an
-alternative). No native VIDEO tool (agy self-reports video is unsupported).
+**agy 1.3.x (verified 2026-10-14 on 1.3.4).** The 1.1.0 recipe further down no longer works.
+Asked to "call your generate_image tool", the root agent called no such tool (its own reasoning
+said the tool list had none), reached for a shell command instead, and print mode auto-denied
+it: exit 0, empty `response`, no image. What works is agy's built-in `image-generator`
+subagent:
+- The root agent calls `invoke_subagent` with that type. The subagent runs as a background
+  task, and stderr shows `root agent idle; waiting up to 30m0s for 1 background task(s)`.
+- The image lands in the run's own conversation folder,
+  `~/.gemini/antigravity-cli/brain/<conversation_id>/`, not in your directory; `--add-dir` did
+  not change that.
+- No `permissions.allow` rule and no `--dangerously-skip-permissions` were needed. The JPEGs
+  were 1024×1024, and a timed run took 82 s.
+
+Global rules can still break it. In print mode agy loads `~/.gemini/GEMINI.md` and its MCP
+servers. If those rules tell the model to call an MCP tool first (a memory server, for
+example), that call is auto-denied and the whole run ends empty, even though the subagent
+itself was allowed. The prompt below rules that out.
 
 ```bash
-cd /path/to/output-dir
-agy -p "Call your generate_image tool immediately — do not research, spawn subagents, or use a
-   skill. Generate a <description>. Save it to the current directory. Print exactly:
-   SAVED: <absolute path>." --model "Gemini 3.8 Flash (High)" --add-dir "$PWD" </dev/null
+# agy 1.3.x: images come from the built-in image-generator subagent and land in agy's own
+# conversation folder; copy one out only if the reported path, symlinks resolved, is inside THIS run's folder,
+# and never over an existing file (exit 4 if the name is taken)
+# Known limit: OUTPUT-DIR is opened again after the run, so use a folder that no other process
+# renames or replaces while agy is generating.
+agy_image() (   # usage: agy_image "description" OUTPUT-DIR   (exit 3 = no image, 4 = not saved: name taken)
+  command -v jq >/dev/null 2>&1 || { echo "agy_image: needs jq to read agy's JSON" >&2; exit 2; }
+  [ -d "$2" ] || { echo "agy_image: OUTPUT-DIR is not a directory: $2" >&2; exit 2; }
+  W=$(mktemp -d "${TMPDIR:-/tmp}/agyimg.XXXXXX") && W=$(cd "$W" && pwd -P) || exit 1
+  trap 'rm -rf "$W"' EXIT
+  # a write probe first, so an unwritable OUTPUT-DIR fails before any generation
+  probe=$(mktemp "$2/.agyimg.XXXXXX") && rm -f "$probe" || { echo "agy_image: cannot write to $2" >&2; exit 2; }
+  out=$(cd "$W" && agy_run 600 -p "Use your image-generator subagent now to generate $1. Do not call MCP or memory tools, and do not run shell commands. When done, print exactly: SAVED: <absolute path>." \
+    --model "Gemini 3.8 Flash (High)" --output-format json </dev/null)
+  rc=$?; [ "$rc" -eq 0 ] || exit "$rc"
+  cid=$(printf '%s' "$out" | jq -r '.conversation_id // empty')
+  src=$(printf '%s' "$out" | jq -r '.response // empty' | sed -n 's/^SAVED: //p' | tail -n 1)
+  case "$src" in
+    ''|*..*) echo "agy_image: no usable SAVED path; denied: $(printf '%s' "$out" | jq -c '.denied_actions')" >&2; exit 3 ;;
+    "$HOME/.gemini/antigravity-cli/brain/$cid/"*) ;;
+    *) echo "agy_image: path is outside this run's folder: $src" >&2; exit 3 ;;
+  esac
+  { [ -n "$cid" ] && [ -f "$src" ] && [ ! -L "$src" ]; } || { echo "agy_image: file missing" >&2; exit 3; }
+  # the prefix check above is only textual: resolve symlinks in both folders and check again
+  bd=$(cd "$HOME/.gemini/antigravity-cli/brain/$cid" 2>/dev/null && pwd -P) &&
+    sd=$(cd "${src%/*}" 2>/dev/null && pwd -P) || { echo "agy_image: cannot resolve $src" >&2; exit 3; }
+  case "$sd/" in
+    "$bd"/*) src="$sd/${src##*/}" ;;
+    *) echo "agy_image: path leaves this run's folder through a symlink: $src" >&2; exit 3 ;;
+  esac
+  # publish without reusing a pathname: create the temp file exclusively through a descriptor on
+  # OUTPUT-DIR, write it through its own descriptor, link(2) it to the final name (fails on any
+  # existing file, directory or symlink, follows none), then check the name holds that same inode
+  python3 -I -c '
+import os, sys
+src, out = sys.argv[1], sys.argv[2]
+name, dst = os.path.basename(src), os.path.join(sys.argv[2], os.path.basename(src))
+dfd = os.open(out, os.O_RDONLY | os.O_DIRECTORY)
+sfd = os.open(src, os.O_RDONLY | os.O_NOFOLLOW)
+tmp = ".agyimg.%d.%s" % (os.getpid(), os.urandom(6).hex())
+fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644, dir_fd=dfd)
+try:
+    while True:
+        buf = memoryview(os.read(sfd, 1 << 20))
+        if not buf:
+            break
+        while buf:
+            buf = buf[os.write(fd, buf):]
+    try:
+        os.link(tmp, name, src_dir_fd=dfd, dst_dir_fd=dfd, follow_symlinks=False)
+    except FileExistsError:
+        print("agy_image: %s already exists; not overwriting (the image is still at %s)" % (dst, src), file=sys.stderr)
+        sys.exit(4)
+    except OSError as e:
+        print("agy_image: could not hard-link into %s (%s); the image is still at %s" % (out, e.strerror, src), file=sys.stderr)
+        sys.exit(1)
+    if os.stat(name, dir_fd=dfd, follow_symlinks=False).st_ino != os.fstat(fd).st_ino:
+        print("agy_image: %s changed while it was being published; check it by hand" % dst, file=sys.stderr)
+        sys.exit(1)
+    print(dst)
+finally:
+    try:
+        os.unlink(tmp, dir_fd=dfd)
+    except OSError:
+        pass
+' "$src" "$2"
+)
+agy_image "a simple green square on a white background" /path/to/output-dir
 ```
 
-Caveat: run the image lane **solo / sequentially** — the agy parallel-burst hang
-(google-antigravity/antigravity-cli#573) applies to media runs too. `--add-dir "$PWD"` (or the
-repo path) makes agy write to your dir instead of its scratch workspace; close stdin
-(`</dev/null`) as with the text lane. An earlier "agy has no image tool" reading was wrong: it
-came from checking `agy models`/`--help` (which never list runtime tools) and from a
-concurrency-hung attempt in a parallel burst — solo, the native tool works. The OpenRouter
-`google/gemini-3-pro-image` path remains a separate, metered, operator-gated fallback, not a
-requirement.
+The model's `SAVED:` line is untrusted text, so the function copies a file only when the path
+sits inside the folder of this run's `conversation_id`, contains no `..`, and is a regular file
+rather than a symlink. Tested 2026-10-14: the function ran live in bash and zsh. An earlier
+script form with the same path checks ran against a stubbed `agy` in bash and `zsh -f`, covering
+an empty answer, a path outside the folder, a `..` path, a symlink and a missing
+`conversation_id`; each exited 3 without copying, and a valid path was copied.
+
+Run the image lane **solo / sequentially**: the agy parallel-burst hang
+(google-antigravity/antigravity-cli#573, seen on 1.1.0) applies to media runs too. No API key
+and no OpenRouter are needed; the Google-account login covers it. agy has no native VIDEO tool.
+The OpenRouter `google/gemini-3-pro-image` path remains a separate, metered, operator-gated
+fallback, not a requirement.
+
+**agy 1.1.0 (historical, verified 2026-07-10).** agy then had a `generate_image` tool that the
+root agent called directly. Like Grok's and Codex's media tools, it was not a CLI flag, so it
+never showed in `agy models` or `agy --help`. A solo run of
+`agy -p "Call your generate_image tool immediately — do not research, spawn subagents, or use a skill. Generate a <description>. Save it to the current directory. Print exactly: SAVED: <absolute path>." --model "Gemini 3.8 Flash (High)" --add-dir "$PWD" </dev/null`
+wrote an orange-triangle JPG into the target dir in ~34 s; `--add-dir "$PWD"` made agy write
+there. An even earlier "agy has no image tool" reading was wrong. It came from checking
+`agy models`/`--help`, which never list runtime tools, and from an attempt that hung in a
+parallel burst.
 
 ### GLM / Kimi / Claude
 
@@ -944,16 +1169,18 @@ watch_clip() (   # subshell: its own EXIT trap, so each clip's workspace is remo
   ffmpeg -nostdin -v error -i "$1" -vf scale=-2:540 \
     -c:v libx264 -crf 30 -c:a aac -b:a 96k "$W/clip.mp4" || exit 1
   P=$(cat "$2") || exit 1   # read the prompt before cd; keep it out of the workspace
-  # macOS has no `timeout`; perl's alarm bounds the run (agy can hang)
-  cd "$W" && perl -e 'alarm shift; exec @ARGV' 300 \
-    agy -p "$P" --model "Gemini 3.8 Flash (High)" --add-dir "$W" --mode plan --sandbox </dev/null
-  rc=$?; exit "$rc"
+  # agy can hang: agy_run (define it once, above) stops it after 300 s with exit 124
+  out=$(cd "$W" && agy_run 300 -p "$P" --model "Gemini 3.8 Flash (High)" --add-dir "$W" --mode plan --sandbox </dev/null)
+  rc=$?; [ "$rc" -eq 0 ] || exit "$rc"
+  # agy 1.3.4 exits 0 with EMPTY output when it auto-denied a tool ("jetski: no output produced")
+  [ -n "$out" ] || { echo "watch_clip: empty answer; agy probably denied a tool" >&2; exit 3; }
+  printf '%s\n' "$out"
 )
 watch_clip input.mp4 watch-prompt.md
 # many clips: while IFS= read -r f <&3; do watch_clip "$f" watch-prompt.md; done 3< clips.txt
 ```
 
-`--mode plan --sandbox` keeps this analysis-only: print mode otherwise runs shell, file and
+`--mode plan --sandbox` keeps this analysis-only: on agy 1.1.0 print mode ran shell, file and
 network tools unprompted (see the notes above), and a clip or prompt can carry misleading
 instructions. Verified 2026-10-09: with both flags the clip was still watched and transcribed,
 while a request to create a file in the workspace was refused. Tell it to only read `clip.mp4`, not to search or create files, to mark unclear words as
@@ -961,8 +1188,20 @@ while a request to create a file in the workspace was refused. Tell it to only r
 fed on a separate descriptor (as shown), so ffmpeg and agy cannot consume the list. Keep the prompt to watching the clip: a prompt
 that also asks it to list the directory or use another tool can end with `jetski: no output
 produced — a tool required the "mcp" permission that headless mode cannot prompt for` (seen
-2026-10-09; the same recipe with a watch-only prompt answered). Keep `ffmpeg -nostdin` in any loop
-(ffmpeg otherwise eats the loop's stdin).
+2026-10-09; the same recipe with a watch-only prompt answered). On 1.3.4 such a run exits 0 with
+empty output, which is why the recipe checks for an empty answer. Put a line such as "Do not run
+shell commands, do not call MCP tools, do not create files; answer in text only" in the watch
+prompt: on 2026-10-13 that line turned a run that had ended with the "command" permission error
+into a normal answer. Keep `ffmpeg -nostdin` in any loop (ffmpeg otherwise eats the loop's stdin).
+
+**Timing limits.** About one frame per second means any sub-second judgement from a watching lane
+is a hypothesis. On 2026-10-13 the High and Medium Gemini 3.8 Flash tiers checked 16 subtitle
+cues burned into a preview: Medium passed all 16, while High flagged two cues as about 0.8 s
+late; the audio showed both flags were sampling artifacts. Word timestamps that Gemini 3.8 Flash
+returned over an API for the same clip drifted by -0.5 to +1.2 s. No lane in this skill returns
+reliable word-level timestamps. For subtitle timing, use a speech-to-text API that returns word
+timestamps (for example ElevenLabs Scribe v2 with `timestamps_granularity=word`, about 10 ms
+resolution), and use the watching lane for content review only.
 
 **GLM: why the CLIs fail, and the path that works.**
 - `opencode` 1.18.35 lists `zai-coding-plan/glm-5.3-flash` with `input.video: true`
@@ -1190,9 +1429,12 @@ structured output for the precise reason. When capturing a piped tool's exit thr
 | GLM confuses similar functions across files | Known limitation | Cross-check its findings against actual file paths |
 | A model returns empty JSON `.text`/`.result`/`.response` | Field name differs by version | Inspect the raw JSON once; adjust the `jq` path |
 | agy file operations land in `~/.gemini/antigravity-cli/scratch` | Antigravity's default working dir is its own scratch workspace, not your cwd | Pass `--add-dir /path/to/repo` (it becomes the working directory); use absolute paths in prompts |
-| agy: `flag needs an argument: -print` | stdin piping is not supported | Use `agy -p "$(cat file)"` — quoted command substitution passes the bytes verbatim |
-| agy modifies files you only wanted reviewed | Print mode runs tools unprompted (yolo-like) | Add `--mode plan` (advice-only) or `--sandbox` |
-| agy: `jetski: no output produced — a tool required the "mcp" permission …` | The prompt made agy reach for a tool that headless mode auto-denies (e.g. listing a directory) | Keep the prompt to the task (e.g. watch only `clip.mp4`) and rerun; do not reach for `--dangerously-skip-permissions` |
+| agy: `flag needs an argument: -print` | `-p` was given no value | Use `agy -p "$(cat file)"` (quoted command substitution passes the bytes verbatim), or on agy 1.3.x omit `-p` and pipe the file on stdin |
+| agy exits 0 with empty output; stderr `jetski: no output produced — a tool required the "…" permission` | agy 1.3.x print mode auto-denies tools; JSON output lists `denied_actions` | Tell the model to answer in text without tools, or add a `permissions.allow` rule; treat empty output as a failed relay |
+| agy: `--effort is not supported for model "Gemini 3.8 Flash (High)"` | `--effort` only works with a base model id | Use `--model gemini-3.8-flash --effort high`, or keep the display string without `--effort` |
+| agy modifies files you only wanted reviewed | agy 1.1.x print mode ran tools unprompted (yolo-like); 1.3.x auto-denies them unless `permissions.allow` or `--dangerously-skip-permissions` allows them | Add `--mode plan` (advice-only) or `--sandbox`, and do not pass `--dangerously-skip-permissions` for reviews |
+| agy: `jetski: no output produced — a tool required the "mcp" permission …` | The prompt made agy reach for a tool that headless mode auto-denies (e.g. listing a directory), or a global rule in `~/.gemini/GEMINI.md` told the model to call an MCP tool first (seen 2026-10-14 with a memory server) | Keep the prompt to the task (e.g. watch only `clip.mp4`), add "do not call MCP or memory tools", and rerun; do not reach for `--dangerously-skip-permissions` |
+| agy image prompt ("call your generate_image tool") exits 0 with no image | agy 1.3.x: the root agent called no `generate_image` tool, made a shell call instead, and print mode denied it | Use `agy_image` (built-in image-generator subagent; the file is copied out of `~/.gemini/antigravity-cli/brain/<conversation_id>/` after a path check) |
 | agy `-p` hangs forever inside a parallel multi-CLI burst | agy 1.1.0 timing/load bug when 3+ other model CLIs run concurrently (solo/pairwise reliable; stagger insufficient) | Run the Gemini lane sequentially around the burst; always cap agy with a timeout |
 | CLI missing or "not authenticated" | Not installed / logged out | Report it, skip that model; run `codex login` / `opencode auth login` / `kimi login` / `grok login` as needed — do not substitute another model silently. Exception: Grok's "not authenticated" from `grok models` is not conclusive — walk the Grok availability ladder first |
 | Long run hangs the shell tool | Tool-level timeout | Set an explicit timeout, or run in background and poll |

@@ -132,7 +132,7 @@ At least one target-model CLI installed and authenticated:
   under a hermetic `env -i` + empty `HOME` + a clean temp `GROK_HOME` with its tool use locked down — belt-and-suspenders now
   that xAI has open-sourced Grok Build and a source audit found the old whole-repo upload path gone.
   See [SECURITY.md](SECURITY.md)
-- `agy` (Google Antigravity CLI, the Gemini CLI's replacement) with a Google login.
+- `agy` (Google Antigravity CLI, the default Gemini lane) with a Google login.
   Install: `curl -fsSL https://antigravity.google/cli/install.sh | bash`
 - `claude` (Claude Code), only usable as a TARGET when the orchestrator is first-party
   Claude Code; see the compliance gate in `SKILL.md`
