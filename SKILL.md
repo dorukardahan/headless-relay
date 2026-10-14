@@ -716,6 +716,9 @@ t, cmd = float(sys.argv[1]), sys.argv[2:]
 SIGS = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
 signal.signal(signal.SIGCHLD, signal.SIG_DFL)  # an inherited SIG_IGN would auto-reap the children
 PS = shutil.which("ps", path=os.defpath) or "/bin/ps"  # the system ps, not one from PATH
+stop = []  # handlers go in before any child exists, so no signal can skip the cleanup
+for s in SIGS:
+    signal.signal(s, lambda n, f: stop.append(130))
 r, w = os.pipe()
 k = os.fork()
 if k == 0:  # keeper: leads the group, reports agy exit status, waits to be killed
@@ -745,15 +748,15 @@ try:
     os.setpgid(k, k)
 except OSError:
     pass
-stop = []
-for s in SIGS:
-    signal.signal(s, lambda n, f: stop.append(130))
 def live():  # group members other than the keeper that are not zombies
     try:
-        ps = subprocess.run([PS, "-A", "-o", "pid=,pgid=,stat="], stdin=subprocess.DEVNULL,
-                            capture_output=True, text=True, timeout=5).stdout
+        res = subprocess.run([PS, "-A", "-o", "pid=,pgid=,stat="], stdin=subprocess.DEVNULL,
+                             capture_output=True, text=True, timeout=5)
     except (OSError, subprocess.SubprocessError):
         return True  # cannot tell: assume members are left, so the group still gets TERM and KILL
+    if res.returncode != 0:
+        return True
+    ps = res.stdout
     return any(f[1] == str(k) and f[0] != str(k) and not f[2].startswith("Z")
                for f in (l.split() for l in ps.splitlines()) if len(f) > 2)
 def finish(rc):  # the keeper is still unreaped here, so the group id is still ours
@@ -1073,9 +1076,9 @@ agy_image() (   # usage: agy_image "description" OUTPUT-DIR   (exit 3 = no image
   command -v jq >/dev/null 2>&1 || { echo "agy_image: needs jq to read agy's JSON" >&2; exit 2; }
   [ -d "$2" ] || { echo "agy_image: OUTPUT-DIR is not a directory: $2" >&2; exit 2; }
   W=$(mktemp -d "${TMPDIR:-/tmp}/agyimg.XXXXXX") && W=$(cd "$W" && pwd -P) || exit 1
-  tmp=""; trap 'rm -rf "$W"; [ -z "$tmp" ] || rm -f "$tmp"' EXIT
-  # create the temp file in OUTPUT-DIR first, so an unwritable folder fails before any generation
-  tmp=$(mktemp "$2/.agyimg.XXXXXX") || { echo "agy_image: cannot write to $2" >&2; exit 2; }
+  trap 'rm -rf "$W"' EXIT
+  # a write probe first, so an unwritable OUTPUT-DIR fails before any generation
+  probe=$(mktemp "$2/.agyimg.XXXXXX") && rm -f "$probe" || { echo "agy_image: cannot write to $2" >&2; exit 2; }
   out=$(cd "$W" && agy_run 600 -p "Use your image-generator subagent now to generate $1. Do not call MCP or memory tools, and do not run shell commands. When done, print exactly: SAVED: <absolute path>." \
     --model "Gemini 3.8 Flash (High)" --output-format json </dev/null)
   rc=$?; [ "$rc" -eq 0 ] || exit "$rc"
@@ -1094,15 +1097,42 @@ agy_image() (   # usage: agy_image "description" OUTPUT-DIR   (exit 3 = no image
     "$bd"/*) src="$sd/${src##*/}" ;;
     *) echo "agy_image: path leaves this run's folder through a symlink: $src" >&2; exit 3 ;;
   esac
-  # never overwrite: copy into the temp file, then hard-link it to the final name with link(2),
-  # which fails on any existing name (file, directory or symlink) and follows none of them
-  dst="$2/${src##*/}"
-  cp "$src" "$tmp" && chmod 644 "$tmp" || exit 1
-  if python3 -I -c 'import os, sys; os.link(sys.argv[1], sys.argv[2])' "$tmp" "$dst" 2>/dev/null; then printf '%s\n' "$dst"; exit 0; fi
-  if [ -e "$dst" ] || [ -L "$dst" ]; then
-    echo "agy_image: $dst already exists; not overwriting (the image is still at $src)" >&2; exit 4
-  fi
-  echo "agy_image: could not hard-link into $2 (filesystem without hard links?); the image is still at $src" >&2; exit 1
+  # publish without reusing a pathname: create the temp file exclusively through a descriptor on
+  # OUTPUT-DIR, write it through its own descriptor, link(2) it to the final name (fails on any
+  # existing file, directory or symlink, follows none), then check the name holds that same inode
+  python3 -I -c '
+import os, sys
+src, out = sys.argv[1], sys.argv[2]
+name, dst = os.path.basename(src), os.path.join(sys.argv[2], os.path.basename(src))
+dfd = os.open(out, os.O_RDONLY | os.O_DIRECTORY)
+sfd = os.open(src, os.O_RDONLY | os.O_NOFOLLOW)
+tmp = ".agyimg.%d.%s" % (os.getpid(), os.urandom(6).hex())
+fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644, dir_fd=dfd)
+try:
+    while True:
+        buf = memoryview(os.read(sfd, 1 << 20))
+        if not buf:
+            break
+        while buf:
+            buf = buf[os.write(fd, buf):]
+    try:
+        os.link(tmp, name, src_dir_fd=dfd, dst_dir_fd=dfd, follow_symlinks=False)
+    except FileExistsError:
+        print("agy_image: %s already exists; not overwriting (the image is still at %s)" % (dst, src), file=sys.stderr)
+        sys.exit(4)
+    except OSError as e:
+        print("agy_image: could not hard-link into %s (%s); the image is still at %s" % (out, e.strerror, src), file=sys.stderr)
+        sys.exit(1)
+    if os.stat(name, dir_fd=dfd, follow_symlinks=False).st_ino != os.fstat(fd).st_ino:
+        print("agy_image: %s changed while it was being published; check it by hand" % dst, file=sys.stderr)
+        sys.exit(1)
+    print(dst)
+finally:
+    try:
+        os.unlink(tmp, dir_fd=dfd)
+    except OSError:
+        pass
+' "$src" "$2"
 )
 agy_image "a simple green square on a white background" /path/to/output-dir
 ```
