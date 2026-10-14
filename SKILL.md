@@ -701,14 +701,21 @@ below and the `agy_image` and `watch_clip` recipes use it.
 
 ```bash
 # agy_run SECS AGY-ARGS...: run agy with a real deadline (exit 124 on timeout). agy is a Go binary
-# and ignores SIGALRM, so `perl -e 'alarm …; exec agy …'` does not stop it; this sends TERM, then
-# KILL 2 s later. agy's own --print-timeout exits 0 with partial output, so it is not a bound.
+# and ignores SIGALRM, so `perl -e 'alarm …; exec agy …'` does not stop it. agy runs in its own
+# process group; at the deadline (or on INT/TERM/HUP) the whole group gets TERM, then KILL 2 s
+# later, so no child keeps the output pipe open. agy's --print-timeout exits 0 with partial output.
 agy_run() (
   t=$1; shift
-  perl -e '$t = shift; $p = fork; defined $p or die "agy_run: fork: $!\n"; if (!$p) { exec @ARGV or exit 127 }
-    $SIG{ALRM} = sub { kill "TERM", $p; for (1 .. 20) { exit 124 if waitpid($p, 1) > 0; select undef, undef, undef, 0.1 }
-      kill "KILL", $p; waitpid($p, 0); exit 124 };
-    alarm $t; waitpid($p, 0); exit($? & 127 ? 128 + ($? & 127) : $? >> 8)' "$t" agy "$@"
+  perl -e '$t = shift; $p = fork; defined $p or die "agy_run: fork: $!\n";
+    if (!$p) { setpgrp(0, 0); exec @ARGV or exit 127 }
+    sub stop { kill "TERM", -$p; my $r = 0;
+      for (1 .. 20) { $r ||= waitpid($p, 1) > 0; last if $r && !kill(0, -$p); select undef, undef, undef, 0.1 }
+      kill "KILL", -$p if kill 0, -$p; waitpid($p, 0) unless $r }
+    $SIG{ALRM} = sub { stop(); exit 124 };
+    $SIG{$_} = sub { stop(); exit 130 } for qw(INT TERM HUP);
+    alarm $t; waitpid($p, 0); $rc = $? & 127 ? 128 + ($? & 127) : $? >> 8; alarm 0;
+    kill "TERM", -$p if kill 0, -$p;   # a child left behind after agy exits would hold the pipe
+    exit $rc' "$t" agy "$@"
 )
 ```
 
@@ -982,6 +989,8 @@ agy_image() (   # usage: agy_image "description" OUTPUT-DIR   (exit 3 = no image
   [ -d "$2" ] || { echo "agy_image: OUTPUT-DIR is not a directory: $2" >&2; exit 2; }
   W=$(mktemp -d "${TMPDIR:-/tmp}/agyimg.XXXXXX") && W=$(cd "$W" && pwd -P) || exit 1
   tmp=""; trap 'rm -rf "$W"; [ -z "$tmp" ] || rm -f "$tmp"' EXIT
+  # create the temp file in OUTPUT-DIR first, so an unwritable folder fails before any generation
+  tmp=$(mktemp "$2/.agyimg.XXXXXX") || { echo "agy_image: cannot write to $2" >&2; exit 2; }
   out=$(cd "$W" && agy_run 600 -p "Use your image-generator subagent now to generate $1. Do not call MCP or memory tools, and do not run shell commands. When done, print exactly: SAVED: <absolute path>." \
     --model "Gemini 3.8 Flash (High)" --output-format json </dev/null)
   rc=$?; [ "$rc" -eq 0 ] || exit "$rc"
@@ -1000,10 +1009,9 @@ agy_image() (   # usage: agy_image "description" OUTPUT-DIR   (exit 3 = no image
     "$bd"/*) src="$sd/${src##*/}" ;;
     *) echo "agy_image: path leaves this run's folder through a symlink: $src" >&2; exit 3 ;;
   esac
-  # never overwrite: copy to a temp name in OUTPUT-DIR, then hard-link it to the final name.
+  # never overwrite: copy into the temp file, then hard-link it to the final name.
   # ln fails if that name already exists (also a symlink) and does not follow it.
   dst="$2/${src##*/}"
-  tmp=$(mktemp "$2/.agyimg.XXXXXX") || exit 1
   cp "$src" "$tmp" && chmod 644 "$tmp" || exit 1
   if ln "$tmp" "$dst" 2>/dev/null; then printf '%s\n' "$dst"; exit 0; fi
   if [ -e "$dst" ] || [ -L "$dst" ]; then
