@@ -711,10 +711,11 @@ Python works).
 agy_run() (
   t=$1; shift
   python3 -I -c '
-import os, select, signal, subprocess, sys, time
+import os, select, shutil, signal, subprocess, sys, time
 t, cmd = float(sys.argv[1]), sys.argv[2:]
 SIGS = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
 signal.signal(signal.SIGCHLD, signal.SIG_DFL)  # an inherited SIG_IGN would auto-reap the children
+PS = shutil.which("ps", path=os.defpath) or "/bin/ps"  # the system ps, not one from PATH
 r, w = os.pipe()
 k = os.fork()
 if k == 0:  # keeper: leads the group, reports agy exit status, waits to be killed
@@ -748,7 +749,11 @@ stop = []
 for s in SIGS:
     signal.signal(s, lambda n, f: stop.append(130))
 def live():  # group members other than the keeper that are not zombies
-    ps = subprocess.run(["ps", "-A", "-o", "pid=,pgid=,stat="], capture_output=True, text=True).stdout
+    try:
+        ps = subprocess.run([PS, "-A", "-o", "pid=,pgid=,stat="], stdin=subprocess.DEVNULL,
+                            capture_output=True, text=True, timeout=5).stdout
+    except (OSError, subprocess.SubprocessError):
+        return True  # cannot tell: assume members are left, so the group still gets TERM and KILL
     return any(f[1] == str(k) and f[0] != str(k) and not f[2].startswith("Z")
                for f in (l.split() for l in ps.splitlines()) if len(f) > 2)
 def finish(rc):  # the keeper is still unreaped here, so the group id is still ours
@@ -764,9 +769,9 @@ def finish(rc):  # the keeper is still unreaped here, so the group id is still o
             time.sleep(0.1)
     try:
         os.kill(k, signal.SIGKILL)
+        os.waitpid(k, 0)
     except OSError:
         pass
-    os.waitpid(k, 0)
     sys.exit(rc)
 end, data = time.monotonic() + t, b""
 while True:
