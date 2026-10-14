@@ -789,7 +789,7 @@ instead, so the Google sign-in went through before the tier check failed.
 | `--output-format <fmt>` | `text` (default), `json`, `stream-json`. JSON keys: `conversation_id`, `status`, `response`, `error`, `duration_seconds`, `num_turns`, `usage`, plus `denied_actions` when a tool was refused. |
 | `--json-schema <schema\|file>` | Enforce structured output (for `stream-json`, only on the final result). |
 | `--input-format stream-json` | One NDJSON message per stdin line, one turn each; requires `--output-format stream-json`. |
-| `--print-timeout <dur>` | Print-mode wait cap. Default `0s` on 1.3.4 (wait until the turn completes; it was `5m0s` on 1.1.x), so always bound the call yourself. |
+| `--print-timeout <dur>` | Print-mode wait cap. Default `0s` on 1.3.4 (wait until the turn completes; it was `5m0s` on 1.1.x), so always bound the call yourself. When it fires, agy prints `print timeout after … returning partial output` on stderr and still exits 0 (an empty `response` in JSON), so it is not a failure signal; bound the run with `agy_run` instead. |
 | `--model <name>` | A model id or display string from `agy models`, e.g. `gemini-3.8-flash-high` or `"Gemini 3.8 Flash (High)"`. Omit to use the user's configured default. |
 | `--effort <level>` | `low\|medium\|high\|xhigh\|max`. Works only with a base model id: `--model gemini-3.8-flash --effort high`. With a display string such as `"Gemini 3.8 Flash (High)"` it fails with `--effort is not supported for model`, and `"Gemini 3.8 Flash"` without a tier suffix is not a valid model. The levels depend on the model: Gemini 4 Argon takes only `low`, `medium` and `high`. |
 | `--add-dir <path>` | Add a directory to the workspace (repeatable) — it also BECOMES the working directory. Without it agy works in its own scratch dir, `~/.gemini/antigravity-cli/scratch`. |
@@ -834,6 +834,23 @@ Notes, all live-verified:
   1.1.0, not retested on 1.3.4 — run the Gemini lane sequentially (before or after the burst),
   cap it with a timeout, and retest on future agy releases. Reported upstream with the full repro
   matrix: github.com/google-antigravity/antigravity-cli/issues/573.
+- **Bound every run with `agy_run`.** agy is a Go binary, and Go programs ignore SIGALRM, so the
+  usual macOS `perl -e 'alarm …; exec agy …'` wrapper does not stop it: a 3 s alarm let a 60 s
+  run finish with exit 0 (1.3.4, 2026-10-14). `agy_run` sends TERM, then KILL, and exits 124.
+  The `agy_image` and `watch_clip` recipes below use it.
+
+```bash
+# agy_run SECS AGY-ARGS...: run agy with a real deadline (exit 124 on timeout). agy is a Go binary
+# and ignores SIGALRM, so `perl -e 'alarm …; exec agy …'` does not stop it; this sends TERM, then
+# KILL 2 s later. agy's own --print-timeout exits 0 with partial output, so it is not a bound.
+agy_run() (
+  t=$1; shift
+  perl -e '$t = shift; $p = fork; defined $p or die "agy_run: fork: $!\n"; if (!$p) { exec @ARGV or exit 127 }
+    $SIG{ALRM} = sub { kill "TERM", $p; for (1 .. 20) { exit 124 if waitpid($p, 1) > 0; select undef, undef, undef, 0.1 }
+      kill "KILL", $p; waitpid($p, 0); exit 124 };
+    alarm $t; waitpid($p, 0); exit($? & 127 ? 128 + ($? & 127) : $? >> 8)' "$t" agy "$@"
+)
+```
 - Baseline latency ~3-15s for a trivial prompt on 1.3.4, depending on the reasoning tier; each
   call carries about 17K input tokens of agy's own context.
 - Working-directory gotcha: file operations land in the scratch workspace unless you pass
@@ -944,15 +961,14 @@ itself was allowed. The prompt below rules that out.
 
 ```bash
 # agy 1.3.x: images come from the built-in image-generator subagent and land in agy's own
-# conversation folder; copy one out only if the reported path is inside THIS run's folder,
+# conversation folder; copy one out only if the reported path, symlinks resolved, is inside THIS run's folder,
 # and never over an existing file (exit 4 if the name is taken)
 agy_image() (   # usage: agy_image "description" OUTPUT-DIR   (exit 3 = no image, 4 = not saved: name taken)
   command -v jq >/dev/null 2>&1 || { echo "agy_image: needs jq to read agy's JSON" >&2; exit 2; }
   [ -d "$2" ] || { echo "agy_image: OUTPUT-DIR is not a directory: $2" >&2; exit 2; }
   W=$(mktemp -d "${TMPDIR:-/tmp}/agyimg.XXXXXX") && W=$(cd "$W" && pwd -P) || exit 1
   tmp=""; trap 'rm -rf "$W"; [ -z "$tmp" ] || rm -f "$tmp"' EXIT
-  out=$(cd "$W" && perl -e 'alarm shift; exec @ARGV' 600 \
-    agy -p "Use your image-generator subagent now to generate $1. Do not call MCP or memory tools, and do not run shell commands. When done, print exactly: SAVED: <absolute path>." \
+  out=$(cd "$W" && agy_run 600 -p "Use your image-generator subagent now to generate $1. Do not call MCP or memory tools, and do not run shell commands. When done, print exactly: SAVED: <absolute path>." \
     --model "Gemini 3.8 Flash (High)" --output-format json </dev/null)
   rc=$?; [ "$rc" -eq 0 ] || exit "$rc"
   cid=$(printf '%s' "$out" | jq -r '.conversation_id // empty')
@@ -963,6 +979,13 @@ agy_image() (   # usage: agy_image "description" OUTPUT-DIR   (exit 3 = no image
     *) echo "agy_image: path is outside this run's folder: $src" >&2; exit 3 ;;
   esac
   { [ -n "$cid" ] && [ -f "$src" ] && [ ! -L "$src" ]; } || { echo "agy_image: file missing" >&2; exit 3; }
+  # the prefix check above is only textual: resolve symlinks in both folders and check again
+  bd=$(cd "$HOME/.gemini/antigravity-cli/brain/$cid" 2>/dev/null && pwd -P) &&
+    sd=$(cd "${src%/*}" 2>/dev/null && pwd -P) || { echo "agy_image: cannot resolve $src" >&2; exit 3; }
+  case "$sd/" in
+    "$bd"/*) src="$sd/${src##*/}" ;;
+    *) echo "agy_image: path leaves this run's folder through a symlink: $src" >&2; exit 3 ;;
+  esac
   # never overwrite: copy to a temp name in OUTPUT-DIR, then hard-link it to the final name.
   # ln fails if that name already exists (also a symlink) and does not follow it.
   dst="$2/${src##*/}"
@@ -1031,9 +1054,8 @@ watch_clip() (   # subshell: its own EXIT trap, so each clip's workspace is remo
   ffmpeg -nostdin -v error -i "$1" -vf scale=-2:540 \
     -c:v libx264 -crf 30 -c:a aac -b:a 96k "$W/clip.mp4" || exit 1
   P=$(cat "$2") || exit 1   # read the prompt before cd; keep it out of the workspace
-  # macOS has no `timeout`; perl's alarm bounds the run (agy can hang)
-  out=$(cd "$W" && perl -e 'alarm shift; exec @ARGV' 300 \
-    agy -p "$P" --model "Gemini 3.8 Flash (High)" --add-dir "$W" --mode plan --sandbox </dev/null)
+  # agy can hang: agy_run (define it once, above) stops it after 300 s with exit 124
+  out=$(cd "$W" && agy_run 300 -p "$P" --model "Gemini 3.8 Flash (High)" --add-dir "$W" --mode plan --sandbox </dev/null)
   rc=$?; [ "$rc" -eq 0 ] || exit "$rc"
   # agy 1.3.4 exits 0 with EMPTY output when it auto-denied a tool ("jetski: no output produced")
   [ -n "$out" ] || { echo "watch_clip: empty answer; agy probably denied a tool" >&2; exit 3; }

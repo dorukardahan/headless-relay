@@ -696,6 +696,22 @@ claude_relay() {
 }
 ```
 
+Define `agy_run` once before any Gemini example. It bounds an agy run for real; the Gemini commands
+below and the `agy_image` and `watch_clip` recipes use it.
+
+```bash
+# agy_run SECS AGY-ARGS...: run agy with a real deadline (exit 124 on timeout). agy is a Go binary
+# and ignores SIGALRM, so `perl -e 'alarm …; exec agy …'` does not stop it; this sends TERM, then
+# KILL 2 s later. agy's own --print-timeout exits 0 with partial output, so it is not a bound.
+agy_run() (
+  t=$1; shift
+  perl -e '$t = shift; $p = fork; defined $p or die "agy_run: fork: $!\n"; if (!$p) { exec @ARGV or exit 127 }
+    $SIG{ALRM} = sub { kill "TERM", $p; for (1 .. 20) { exit 124 if waitpid($p, 1) > 0; select undef, undef, undef, 0.1 }
+      kill "KILL", $p; waitpid($p, 0); exit 124 };
+    alarm $t; waitpid($p, 0); exit($? & 127 ? 128 + ($? & 127) : $? >> 8)' "$t" agy "$@"
+)
+```
+
 
 ```bash
 # GPT (Codex) — default sandbox is read-only, no network
@@ -722,7 +738,7 @@ grok_relay "your question here"
 
 # Gemini via Antigravity — model id or display string from `agy models`. agy 1.3.x exits 0 with
 #   EMPTY output when it auto-denied a tool, so treat an empty answer as a failure.
-agy -p "your question here" --model "Gemini 3.8 Flash (High)"
+agy_run 300 -p "your question here" --model "Gemini 3.8 Flash (High)"
 
 # Claude (headless subprocess)
 claude_relay -p "your question here"
@@ -767,7 +783,7 @@ kimi_relay_file "/tmp/handoff.md" "$KIMI_MODEL"
 grok_relay "$(cat /tmp/handoff.md)"
 
 # Antigravity: substitute the file into the arg (agy 1.3.x also reads stdin when -p is omitted)
-agy -p "$(cat /tmp/handoff.md)"
+agy_run 300 -p "$(cat /tmp/handoff.md)"
 
 # Claude: command-substitute the file into the prompt arg
 claude_relay -p "$(cat /tmp/handoff.md)"
@@ -829,7 +845,7 @@ if wait "$kimi_pid"; then kimi_status=0; else kimi_status=$?; fi
 printf '%s\n' "$kimi_status" > /tmp/ans-kimi.status
 wait
 # Gemini runs SEQUENTIALLY, AFTER the burst — agy 1.1.0 wedges inside a 3+ CLI burst (see below):
-agy -p "$(cat /tmp/handoff.md)" --model "Gemini 3.8 Flash (High)" > /tmp/ans-gemini.md 2>/dev/null
+agy_run 300 -p "$(cat /tmp/handoff.md)" --model "Gemini 3.8 Flash (High)" > /tmp/ans-gemini.md 2>/dev/null
 ```
 
 On a machine with ZCode instead of OpenCode, swap the GLM lane:
@@ -959,15 +975,14 @@ perl -e 'alarm shift; exec @ARGV' 480 \
 # too). The Google-account login covers it: no API key, no OpenRouter. Verified 2026-10-14 on
 # agy 1.3.4 (details in references/cli-reference.md).
 # agy 1.3.x: images come from the built-in image-generator subagent and land in agy's own
-# conversation folder; copy one out only if the reported path is inside THIS run's folder,
+# conversation folder; copy one out only if the reported path, symlinks resolved, is inside THIS run's folder,
 # and never over an existing file (exit 4 if the name is taken)
 agy_image() (   # usage: agy_image "description" OUTPUT-DIR   (exit 3 = no image, 4 = not saved: name taken)
   command -v jq >/dev/null 2>&1 || { echo "agy_image: needs jq to read agy's JSON" >&2; exit 2; }
   [ -d "$2" ] || { echo "agy_image: OUTPUT-DIR is not a directory: $2" >&2; exit 2; }
   W=$(mktemp -d "${TMPDIR:-/tmp}/agyimg.XXXXXX") && W=$(cd "$W" && pwd -P) || exit 1
   tmp=""; trap 'rm -rf "$W"; [ -z "$tmp" ] || rm -f "$tmp"' EXIT
-  out=$(cd "$W" && perl -e 'alarm shift; exec @ARGV' 600 \
-    agy -p "Use your image-generator subagent now to generate $1. Do not call MCP or memory tools, and do not run shell commands. When done, print exactly: SAVED: <absolute path>." \
+  out=$(cd "$W" && agy_run 600 -p "Use your image-generator subagent now to generate $1. Do not call MCP or memory tools, and do not run shell commands. When done, print exactly: SAVED: <absolute path>." \
     --model "Gemini 3.8 Flash (High)" --output-format json </dev/null)
   rc=$?; [ "$rc" -eq 0 ] || exit "$rc"
   cid=$(printf '%s' "$out" | jq -r '.conversation_id // empty')
@@ -978,6 +993,13 @@ agy_image() (   # usage: agy_image "description" OUTPUT-DIR   (exit 3 = no image
     *) echo "agy_image: path is outside this run's folder: $src" >&2; exit 3 ;;
   esac
   { [ -n "$cid" ] && [ -f "$src" ] && [ ! -L "$src" ]; } || { echo "agy_image: file missing" >&2; exit 3; }
+  # the prefix check above is only textual: resolve symlinks in both folders and check again
+  bd=$(cd "$HOME/.gemini/antigravity-cli/brain/$cid" 2>/dev/null && pwd -P) &&
+    sd=$(cd "${src%/*}" 2>/dev/null && pwd -P) || { echo "agy_image: cannot resolve $src" >&2; exit 3; }
+  case "$sd/" in
+    "$bd"/*) src="$sd/${src##*/}" ;;
+    *) echo "agy_image: path leaves this run's folder through a symlink: $src" >&2; exit 3 ;;
+  esac
   # never overwrite: copy to a temp name in OUTPUT-DIR, then hard-link it to the final name.
   # ln fails if that name already exists (also a symlink) and does not follow it.
   dst="$2/${src##*/}"
@@ -1029,7 +1051,7 @@ brand risks) is not the same as generating one. Live-tested 2026-10-09:
 | Target | Can it watch a local clip headlessly? |
 |--------|---------------------------------------|
 | Gemini (agy, `"Gemini 3.8 Flash (High)"`) | **YES** — ~1 frame/s plus an automatic speech transcript (no raw audio). The lane to use for talks, interviews, jokes, quotes |
-| Gemini (agy, `"Gemini 4 Argon (High)"`, Google AI Ultra / eligible Enterprise only) | **YES** — one 20 s test (2026-10-14, agy 1.3.4, the `watch_clip` flow with the model swapped): speech came back split by sentence, with start and end times within about 0.6 s of word-level STT cue times, where 3.8 Flash returned one block. It also listed five booth names that the frames at that timestamp do not show, so check on-screen text and names against the frames |
+| Gemini (agy, `"Gemini 4 Argon (High)"`, Google AI Ultra / eligible Enterprise only) | **YES** — one 20 s test (2026-10-14, agy 1.3.4, the `watch_clip` flow with the model swapped): speech came back split by sentence, with start and end times within about 0.6 s of word-level STT cue times (3.8 Flash returned one block in that run but split by sentence in two later runs, so this is not a clear difference). It also listed five booth names that the frames at that timestamp do not show, so check on-screen text and names against the frames |
 | GLM-5.3-Flash | **Frames only, no speech**, and only through the Coding Plan API's `video_url` part. `opencode` lists the model as video-capable but its provider rejects video (and `run` exits 0 with empty output); `zcode --attach` forwards an empty placeholder |
 | Grok 4.7 | **NO** — `read_file` skips video as binary and the headless CLI forwards only image blocks |
 | GPT (Codex), Claude | Not tested |
@@ -1042,9 +1064,8 @@ watch_clip() (   # subshell: its own EXIT trap, so each clip's workspace is remo
   ffmpeg -nostdin -v error -i "$1" -vf scale=-2:540 \
     -c:v libx264 -crf 30 -c:a aac -b:a 96k "$W/clip.mp4" || exit 1
   P=$(cat "$2") || exit 1   # read the prompt before cd; keep it out of the workspace
-  # macOS has no `timeout`; perl's alarm bounds the run (agy can hang)
-  out=$(cd "$W" && perl -e 'alarm shift; exec @ARGV' 300 \
-    agy -p "$P" --model "Gemini 3.8 Flash (High)" --add-dir "$W" --mode plan --sandbox </dev/null)
+  # agy can hang: agy_run (define it once, above) stops it after 300 s with exit 124
+  out=$(cd "$W" && agy_run 300 -p "$P" --model "Gemini 3.8 Flash (High)" --add-dir "$W" --mode plan --sandbox </dev/null)
   rc=$?; [ "$rc" -eq 0 ] || exit "$rc"
   # agy 1.3.4 exits 0 with EMPTY output when it auto-denied a tool ("jetski: no output produced")
   [ -n "$out" ] || { echo "watch_clip: empty answer; agy probably denied a tool" >&2; exit 3; }
