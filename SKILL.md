@@ -702,19 +702,20 @@ below and the `agy_image` and `watch_clip` recipes use it.
 ```bash
 # agy_run SECS AGY-ARGS...: run agy with a real deadline (exit 124 on timeout). agy is a Go binary
 # and ignores SIGALRM, so `perl -e 'alarm …; exec agy …'` does not stop it. agy runs in its own
-# process group; at the deadline (or on INT/TERM/HUP) the whole group gets TERM, then KILL 2 s
-# later, so no child keeps the output pipe open. agy's --print-timeout exits 0 with partial output.
+# process group; at the deadline, on INT/TERM/HUP, or when agy exits and leaves children behind,
+# the whole group gets TERM, then KILL 2 s later, so no child keeps the output pipe open.
+# agy's --print-timeout exits 0 with partial output, so it is not a bound.
 agy_run() (
   t=$1; shift
   perl -e '$t = shift; $p = fork; defined $p or die "agy_run: fork: $!\n";
     if (!$p) { setpgrp(0, 0); exec @ARGV or exit 127 }
-    sub stop { kill "TERM", -$p; my $r = 0;
+    sub stop { my $r = shift; kill "TERM", -$p;   # $r: agy itself is already reaped
       for (1 .. 20) { $r ||= waitpid($p, 1) > 0; last if $r && !kill(0, -$p); select undef, undef, undef, 0.1 }
       kill "KILL", -$p if kill 0, -$p; waitpid($p, 0) unless $r }
-    $SIG{ALRM} = sub { stop(); exit 124 };
-    $SIG{$_} = sub { stop(); exit 130 } for qw(INT TERM HUP);
+    $SIG{ALRM} = sub { stop(0); exit 124 };
+    $SIG{$_} = sub { stop(0); exit 130 } for qw(INT TERM HUP);
     alarm $t; waitpid($p, 0); $rc = $? & 127 ? 128 + ($? & 127) : $? >> 8; alarm 0;
-    kill "TERM", -$p if kill 0, -$p;   # a child left behind after agy exits would hold the pipe
+    stop(1) if kill 0, -$p;   # a child left behind after agy exits would hold the pipe
     exit $rc' "$t" agy "$@"
 )
 ```
@@ -852,7 +853,10 @@ if wait "$kimi_pid"; then kimi_status=0; else kimi_status=$?; fi
 printf '%s\n' "$kimi_status" > /tmp/ans-kimi.status
 wait
 # Gemini runs SEQUENTIALLY, AFTER the burst — agy 1.1.0 wedges inside a 3+ CLI burst (see below):
-agy_run 300 -p "$(cat /tmp/handoff.md)" --model "Gemini 3.8 Flash (High)" > /tmp/ans-gemini.md 2>/dev/null
+# agy 1.3.x exits 0 with EMPTY output when it denied a tool, so an empty answer is a failure (3):
+if agy_run 300 -p "$(cat /tmp/handoff.md)" --model "Gemini 3.8 Flash (High)" > /tmp/ans-gemini.md 2>/tmp/ans-gemini.err; then gemini_status=0; else gemini_status=$?; fi
+if [ "$gemini_status" -eq 0 ] && [ ! -s /tmp/ans-gemini.md ]; then gemini_status=3; fi
+printf '%s\n' "$gemini_status" > /tmp/ans-gemini.status
 ```
 
 On a machine with ZCode instead of OpenCode, swap the GLM lane:
@@ -866,7 +870,9 @@ the Antigravity section of [references/cli-reference.md](references/cli-referenc
 Before synthesis, read `/tmp/ans-kimi.status`: a nonzero status (including timeout 124 or input
 rejection 2) means the Kimi lane failed, even if it emitted partial text. Do not promote that
 artifact as a successful answer; keep its bounded diagnostic/status and successful siblings.
-The bare `wait` above joins remaining siblings, not a Kimi success check.
+The bare `wait` above joins remaining siblings, not a Kimi success check. Read
+`/tmp/ans-gemini.status` the same way: 124 is the `agy_run` deadline, 3 an empty answer (a denied
+tool; `/tmp/ans-gemini.err` says which), and either one means the Gemini lane failed.
 
 Then read the successful answer files and present a merged view: shared findings first, then each model's
 unique points, then contradictions to resolve. A finding cited with a specific file:line by one

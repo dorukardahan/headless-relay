@@ -843,19 +843,20 @@ Notes, all live-verified:
 ```bash
 # agy_run SECS AGY-ARGS...: run agy with a real deadline (exit 124 on timeout). agy is a Go binary
 # and ignores SIGALRM, so `perl -e 'alarm …; exec agy …'` does not stop it. agy runs in its own
-# process group; at the deadline (or on INT/TERM/HUP) the whole group gets TERM, then KILL 2 s
-# later, so no child keeps the output pipe open. agy's --print-timeout exits 0 with partial output.
+# process group; at the deadline, on INT/TERM/HUP, or when agy exits and leaves children behind,
+# the whole group gets TERM, then KILL 2 s later, so no child keeps the output pipe open.
+# agy's --print-timeout exits 0 with partial output, so it is not a bound.
 agy_run() (
   t=$1; shift
   perl -e '$t = shift; $p = fork; defined $p or die "agy_run: fork: $!\n";
     if (!$p) { setpgrp(0, 0); exec @ARGV or exit 127 }
-    sub stop { kill "TERM", -$p; my $r = 0;
+    sub stop { my $r = shift; kill "TERM", -$p;   # $r: agy itself is already reaped
       for (1 .. 20) { $r ||= waitpid($p, 1) > 0; last if $r && !kill(0, -$p); select undef, undef, undef, 0.1 }
       kill "KILL", -$p if kill 0, -$p; waitpid($p, 0) unless $r }
-    $SIG{ALRM} = sub { stop(); exit 124 };
-    $SIG{$_} = sub { stop(); exit 130 } for qw(INT TERM HUP);
+    $SIG{ALRM} = sub { stop(0); exit 124 };
+    $SIG{$_} = sub { stop(0); exit 130 } for qw(INT TERM HUP);
     alarm $t; waitpid($p, 0); $rc = $? & 127 ? 128 + ($? & 127) : $? >> 8; alarm 0;
-    kill "TERM", -$p if kill 0, -$p;   # a child left behind after agy exits would hold the pipe
+    stop(1) if kill 0, -$p;   # a child left behind after agy exits would hold the pipe
     exit $rc' "$t" agy "$@"
 )
 ```
@@ -910,8 +911,11 @@ where the brief instructs: "Use your `image_gen` tool to generate <description>.
 in the current working directory. Print the saved absolute path on its own line prefixed with
 `SAVED:`. If you have no image tool, print `IMAGE TOOL: NONE`." `--disable-web-search` does NOT
 disable the media tools — the `--tools` allow-list is the safeguard, not that flag.
-For image-only work, Codex or agy (below) need no such helper — neither has a global-rule-leak or
-data-egress history, so they write straight into your output dir. Live-verified on 0.2.101:
+For image-only work, Codex needs no such helper: it has no global-rule-leak or data-egress
+history and writes straight into your output dir. agy (below) has the same clean record, but on
+1.3.x the image lands in agy's own conversation folder, so use `agy_image`, which copies it out
+after its path and no-clobber checks (agy 1.1.0 wrote into the `--add-dir` folder).
+Live-verified on 0.2.101:
 `image_gen` runs under `grok_media`'s empty non-git CWD + clean temp `GROK_HOME` with a `--tools`
 allow-list of only the four media tools (a blanket `--deny '*'` blocks `image_gen`).
 
