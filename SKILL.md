@@ -772,7 +772,7 @@ def finish(rc):  # the keeper is still unreaped here, so the group id is still o
         os.waitpid(k, 0)
     except OSError:
         pass
-    sys.exit(rc)
+    sys.exit(stop[0] if stop else rc)  # a signal during cleanup still counts
 end, data = time.monotonic() + t, b""
 while True:
     if stop:
@@ -1094,11 +1094,11 @@ agy_image() (   # usage: agy_image "description" OUTPUT-DIR   (exit 3 = no image
     "$bd"/*) src="$sd/${src##*/}" ;;
     *) echo "agy_image: path leaves this run's folder through a symlink: $src" >&2; exit 3 ;;
   esac
-  # never overwrite: copy into the temp file, then hard-link it to the final name.
-  # ln fails if that name already exists (also a symlink) and does not follow it.
+  # never overwrite: copy into the temp file, then hard-link it to the final name with link(2),
+  # which fails on any existing name (file, directory or symlink) and follows none of them
   dst="$2/${src##*/}"
   cp "$src" "$tmp" && chmod 644 "$tmp" || exit 1
-  if ln "$tmp" "$dst" 2>/dev/null; then printf '%s\n' "$dst"; exit 0; fi
+  if python3 -I -c 'import os, sys; os.link(sys.argv[1], sys.argv[2])' "$tmp" "$dst" 2>/dev/null; then printf '%s\n' "$dst"; exit 0; fi
   if [ -e "$dst" ] || [ -L "$dst" ]; then
     echo "agy_image: $dst already exists; not overwriting (the image is still at $src)" >&2; exit 4
   fi
