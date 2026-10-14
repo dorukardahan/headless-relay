@@ -714,6 +714,7 @@ agy_run() (
 import os, select, signal, subprocess, sys, time
 t, cmd = float(sys.argv[1]), sys.argv[2:]
 SIGS = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
+signal.signal(signal.SIGCHLD, signal.SIG_DFL)  # an inherited SIG_IGN would auto-reap the children
 r, w = os.pipe()
 k = os.fork()
 if k == 0:  # keeper: leads the group, reports agy exit status, waits to be killed
@@ -758,8 +759,8 @@ def finish(rc):  # the keeper is still unreaped here, so the group id is still o
             os.killpg(k, sig)
         except OSError:
             pass
-        end = time.time() + wait
-        while time.time() < end and live():
+        end = time.monotonic() + wait
+        while time.monotonic() < end and live():
             time.sleep(0.1)
     try:
         os.kill(k, signal.SIGKILL)
@@ -767,11 +768,11 @@ def finish(rc):  # the keeper is still unreaped here, so the group id is still o
         pass
     os.waitpid(k, 0)
     sys.exit(rc)
-end, data = time.time() + t, b""
+end, data = time.monotonic() + t, b""
 while True:
     if stop:
         finish(stop[0])
-    left = end - time.time()
+    left = end - time.monotonic()
     if left <= 0:
         finish(124)
     if select.select([r], [], [], min(left, 0.2))[0]:
