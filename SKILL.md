@@ -745,8 +745,12 @@ kimi_relay "your question here" "$KIMI_MODEL"
 grok_relay "your question here"
 
 # Gemini via Antigravity — model id or display string from `agy models`. agy 1.3.x exits 0 with
-#   EMPTY output when it auto-denied a tool, so treat an empty answer as a failure.
-agy_run 300 -p "your question here" --model "Gemini 3.8 Flash (High)"
+#   EMPTY output when it auto-denied a tool, so an empty answer is a failure, not a success.
+if ans=$(agy_run 300 -p "your question here" --model "Gemini 3.8 Flash (High)") && [ -n "$ans" ]; then
+  printf '%s\n' "$ans"
+else
+  echo "agy: no usable answer (timeout 124, an error, or empty after a denied tool)" >&2
+fi
 
 # Claude (headless subprocess)
 claude_relay -p "your question here"
@@ -790,8 +794,9 @@ kimi_relay_file "/tmp/handoff.md" "$KIMI_MODEL"
 # re-interpreted, so backticks/$ in the file are safe (same reason `gh --body-file` beats --body).
 grok_relay "$(cat /tmp/handoff.md)"
 
-# Antigravity: substitute the file into the arg (agy 1.3.x also reads stdin when -p is omitted)
-agy_run 300 -p "$(cat /tmp/handoff.md)"
+# Antigravity: substitute the file into the arg (agy 1.3.x also reads stdin when -p is omitted);
+# an empty answer is a failure, as in the baseline above
+if ans=$(agy_run 300 -p "$(cat /tmp/handoff.md)") && [ -n "$ans" ]; then printf '%s\n' "$ans"; else echo "agy: no usable answer" >&2; fi
 
 # Claude: command-substitute the file into the prompt arg
 claude_relay -p "$(cat /tmp/handoff.md)"
