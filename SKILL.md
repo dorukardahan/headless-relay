@@ -1263,6 +1263,7 @@ while a same-provider second opinion should stay in-session as a subagent.
 | [references/anthropic-terms.md](references/anthropic-terms.md) | Compliance detail: Anthropic subscription-routing block, Commercial Terms D.4, Fable 5 safeguards, enforcement history, plus the OpenAI / xAI / Z.ai / Google provider-terms matrix, with citations |
 | [references/reprompter-relay.md](references/reprompter-relay.md) | Pairing recipe: run a prompt-engineering skill (e.g. RePrompter) before relaying a nontrivial task; documents the RePrompter handoff contract |
 | [references/custom-targets.md](references/custom-targets.md) | User-connected targets: `~/.agents/relay-targets.json` registry for local models (Ollama, LM Studio, MLX) and other one-shot CLIs — field contract, preflight, security rules |
+| [references/role-routing.md](references/role-routing.md) | Generic, configurable role-to-lane routing template: per-role primary/fallback/third table, example invocations for the Codex, Claude, GLM (custom lane) and Gemini lanes, the different-family rule for reviewers and judges, and the general fallback order |
 
 ## Troubleshooting (core)
 
