@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- `references/role-routing.md`: a generic, configurable template for routing roles (coding, judgment, exploration, review, swarm) to lanes, with a primary/fallback/third table, example invocations for the Codex, Claude, GLM (as a custom target) and Gemini lanes, the rule that reviewers and judges must come from a different provider family than the writer, and a general fallback order. Linked from the SKILL.md reference table.
+
 ### Fixed
 
 - Kimi relay on macOS: every run ended with `kimi-relay: refusing: [Errno 3] No such process`, which also hid Kimi's real exit status. macOS answers `getpgid` with ESRCH for an exited-but-unreaped leader and `killpg` with EPERM when that zombie is the only member left; the old code treated both as ownership loss. The relay now proves ownership with `waitid(P_PID, WNOWAIT)`, which only succeeds for its own unreaped child, and accepts EPERM only when `ps` shows no live member in the group. A live member it cannot signal still refuses.
