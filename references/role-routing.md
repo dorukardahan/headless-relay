@@ -18,7 +18,7 @@ model id touches one place.
 |-------|-----------------|--------------------------------|
 | `codex` | OpenAI | `codex exec -s read-only --skip-git-repo-check -m <codex-model> </dev/null` |
 | `claude` | Anthropic | `claude -p --model <claude-model> --permission-mode plan --output-format json </dev/null` |
-| `glm` | Zhipu | a Claude-Code-style custom lane, see below |
+| `glm` | Zhipu | a Claude-Code-style custom lane registered as `glm-custom`, see below |
 | `gemini` | Google | `agy -p "<prompt>" --model <agy-model> </dev/null`, always solo |
 
 Notes per lane:
@@ -30,13 +30,15 @@ Notes per lane:
   read-only. Mind the Claude gate in [anthropic-terms.md](anthropic-terms.md).
 - **glm.** Some GLM setups ship a CLI that accepts the Claude Code flag set (`-p`,
   `--permission-mode`, `--output-format`) and points it at the GLM endpoint. Register it as a
-  custom target (see [custom-targets.md](custom-targets.md)) rather than hard-coding it:
+  custom target (see [custom-targets.md](custom-targets.md)) rather than hard-coding it. Registry
+  names must not collide with a built-in lane name, so register it under a distinct name such as
+  `glm-custom` and map the routing alias `glm` to that entry:
 
   ```json
   {
     "targets": [
       {
-        "name": "glm",
+        "name": "glm-custom",
         "binary_check": "command -v <glm-cli>",
         "auth_check": null,
         "invoke": "<glm-cli> -p --permission-mode plan --output-format json \"$(cat {PROMPT_FILE})\" </dev/null",
