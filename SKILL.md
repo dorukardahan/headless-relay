@@ -908,8 +908,9 @@ Normalize and freeze one canonical user brief
 as documented in the reference; this does not promise identical total model context. Do not
 install tools, log in, rotate auth, or silently substitute models to make the roster look complete.
 
-Compatible cloud/CLI lanes may run in parallel. Antigravity stays sequential because of its
-documented burst hang; heavyweight local custom targets stay sequential unless their registry notes
+Compatible cloud/CLI lanes may run in parallel. Antigravity stays sequential inside a multi-CLI
+burst because of its documented hang (agy-only batch lanes are a separate case, below);
+heavyweight local custom targets stay sequential unless their registry notes
 explicitly permit concurrency. Capture one artifact and status receipt per lane. The parent
 orchestrator—not one council member—synthesizes shared findings, unique findings, contradictions,
 and skipped-lane reasons. Preserve dissent: majority vote is not evidence.
@@ -948,6 +949,8 @@ Gemini caution: run the `agy` lane SEQUENTIALLY (before the burst or after it fi
 inside it — agy 1.1.0 reliably wedges when started alongside 3+ other concurrent model CLIs
 (solo and pairwise runs are fine; a 5s stagger does not help). It is fast solo (~10-30s). See
 the Antigravity section of [references/cli-reference.md](references/cli-reference.md).
+That warning is the multi-CLI burst. It does not cover agy-only lanes for independent jobs
+(the subsection below).
 
 Before synthesis, read `/tmp/ans-kimi.status`: a nonzero status (including timeout 124 or input
 rejection 2) means the Kimi lane failed, even if it emitted partial text. Do not promote that
@@ -959,6 +962,77 @@ tool; `/tmp/ans-gemini.err` says which), and either one means the Gemini lane fa
 Then read the successful answer files and present a merged view: shared findings first, then each model's
 unique points, then contradictions to resolve. A finding cited with a specific file:line by one
 model beats a vague agreement from the others — verify before dismissing it as an outlier.
+
+#### Batch jobs: parallel agy lanes
+
+The caution above is about mixing `agy` into a burst with other model CLIs. Party / Council
+Mode still keeps Antigravity out of that burst. Several `agy` processes, with no other model
+CLI in the burst, are a different case.
+
+Observed once, on 2026-11-01, with agy 1.3.x and one account (model `gemini-4-argon-high`):
+4 to 6 parallel agy lanes watched 65 short vertical clips, one clip per call. 65 of 65
+finished, 0 failures, about 5.7 minutes per clip on average. This is one observation, not a
+guarantee, and it is not a retest of the 1.1.0 multi-CLI wedge.
+
+Each call used the existing `agy_run` hard deadline at 900 s, with one retry on failure. A
+lane claims an item with an atomic `mkdir locks/NN` plus an `inflight/NN` file holding the
+lane PID. It skips an item whose output already exists, or whose inflight PID is alive, and
+removes both markers when the item is done, so a relaunch resumes. The runner was started
+detached with `setsid nohup bash runner.sh &`, so it survives the calling agent's turn. The
+aggregate index was built once, after every lane had finished, not per item.
+
+```bash
+# runner.sh — sketch of that 2026-11-01 agy-only batch. Not a shipped helper, not a guarantee.
+# Define agy_run once first. bash: $BASHPID is this lane ($$ is the parent). No other model CLI.
+# 4 to 6 lanes were the observed range; one video per call; agy_run 900; one retry.
+# Detach so the batch outlives the calling agent's turn:
+#   setsid nohup bash runner.sh &
+LANES=5
+mkdir -p locks inflight out
+# items/NN/ holds that one clip only. agy can read everything under --add-dir.
+claim() { # $1 = NN. 0 = this lane owns it. mkdir is the atomic claim.
+  [ -s "out/$1.md" ] && return 1
+  if ! mkdir "locks/$1" 2>/dev/null; then
+    pid=$(cat "inflight/$1" 2>/dev/null || true)
+    # alive owner, or a claim that has not recorded a PID yet: leave it
+    if [ -z "$pid" ] || kill -0 "$pid" 2>/dev/null; then return 1; fi
+    rm -f "inflight/$1"
+    rmdir "locks/$1" 2>/dev/null || return 1
+    mkdir "locks/$1" 2>/dev/null || return 1
+  fi
+  printf '%s\n' "$BASHPID" > "inflight/$1"
+}
+run_one() { # $1 = items/NN, $2 = NN. Publish out/NN.md only after a non-empty answer.
+  try() {
+    text=$(agy_run 900 -p "$(cat prompt.md)" --model gemini-4-argon-high --add-dir "$1" </dev/null) || return $?
+    [ -n "$text" ] || return 3   # empty answer: existing agy 1.3.x failure
+    printf '%s\n' "$text"
+  }
+  try "$1" > "out/$2.md.tmp" || try "$1" > "out/$2.md.tmp" || return $?
+  mv "out/$2.md.tmp" "out/$2.md"
+}
+lane() {
+  for dir in items/*/; do
+    [ -d "$dir" ] || continue
+    id=$(basename "$dir")
+    claim "$id" || continue
+    run_one "$dir" "$id" || rm -f "out/$id.md.tmp"
+    rm -f "inflight/$id"
+    rmdir "locks/$id" 2>/dev/null || true
+  done
+}
+n=0
+while [ "$n" -lt "$LANES" ]; do lane & n=$((n + 1)); done
+wait
+# One aggregate index, after every lane has finished — not inside the loop.
+: > index.txt
+for f in out/*.md; do [ -f "$f" ] && printf '%s\n' "$f" >> index.txt; done
+```
+
+The model id has to be one this account's `agy models` lists. `gemini-4-argon-high` is what
+that run used. An empty answer is still a failure: agy 1.3.x exits 0 with no text when it
+denies a tool, which is why the sketch treats empty output as exit 3 (the same rule as
+`agy_answer`). A failed attempt does not leave `out/NN.md`, so the next launch can claim it.
 
 ### Scenario D — the model must read the repo or run git/gh
 Only Codex needs special handling: its default sandbox blocks file writes AND the network.
@@ -1182,7 +1256,7 @@ brand risks) is not the same as generating one. Live-tested 2026-10-09:
 | GPT (Codex), Claude | Not tested |
 
 ```bash
-# Gemini: clip alone in a fresh private dir (re-encoded to ~540p), run solo, bounded
+# Gemini: clip alone in a fresh private dir (re-encoded to ~540p), outside a multi-CLI burst, bounded
 watch_clip() (   # subshell: its own EXIT trap, so each clip's workspace is removed, also in a loop
   W=$(mktemp -d "${TMPDIR:-/tmp}/watch.XXXXXX") && W=$(cd "$W" && pwd -P) || exit 1   # absolute, even if TMPDIR is relative
   trap 'rm -rf "$W"' EXIT
@@ -1197,8 +1271,12 @@ watch_clip() (   # subshell: its own EXIT trap, so each clip's workspace is remo
   printf '%s\n' "$out"
 )
 watch_clip input.mp4 watch-prompt.md
-# many clips: while IFS= read -r f <&3; do watch_clip "$f" watch-prompt.md; done 3< clips.txt
+# many clips, one after another: while IFS= read -r f <&3; do watch_clip "$f" watch-prompt.md; done 3< clips.txt
 ```
+
+That loop is sequential, and `watch_clip` still uses a 300 s deadline. agy-only parallel lanes
+for independent clips, with no other model CLI, are the separate 2026-11-01 observation in
+Scenario C ("Batch jobs: parallel agy lanes"): 900 s, one retry, not a retest of the multi-CLI hang.
 
 The prompt should say: read only `clip.mp4`, no web search, no new files, timestamps, verbatim
 speech with `[unclear]` for unclear words, say plainly if audio is unavailable. Zoom into the frame
@@ -1299,7 +1377,7 @@ while a same-provider second opinion should stay in-session as a subagent.
 | agy exits 0 with empty output; stderr `jetski: no output produced — a tool required the "…" permission` | agy 1.3.x print mode auto-denies tools (shell, file write, URL read, MCP). Tell the model to answer in text without tools, or allow that tool in agy's settings.json; treat empty output as a failed relay |
 | agy image prompt ("call your generate_image tool") exits 0 with no image | agy 1.3.x: the root agent makes a shell call instead, and print mode denies it. Use `agy_image` (Scenario H), which asks for the built-in image-generator subagent and copies the file out of agy's conversation folder |
 | agy run ends empty with a denied "mcp" action you never asked for | agy loads `~/.gemini/GEMINI.md` and its MCP servers in print mode; a rule that says "call this MCP tool first" (e.g. a memory server) gets auto-denied and ends the run. Add "do not call MCP or memory tools" to the prompt |
-| agy `-p` never returns when launched inside a parallel multi-CLI burst | Known agy 1.1.0 timing bug (solo/pairwise runs are reliable) — run the Gemini lane sequentially around the burst, and always cap it with a timeout |
+| agy `-p` never returns when launched inside a parallel multi-CLI burst | Known agy 1.1.0 timing bug (solo/pairwise runs are reliable) — run the Gemini lane sequentially around the burst, and always cap it with a timeout. agy-only lanes for independent jobs are a separate observed case (Scenario C, "Batch jobs: parallel agy lanes"), not a retest of this bug |
 | GLM cites a CI/workflow/env change not in the diff | Known GLM infra-hallucination — verify against the actual file before acting |
 | A CLI is missing or unauthenticated | Report it and skip that model; do not substitute another silently |
 | A non-Anthropic harness (OpenClaw / Hermes) triggered this skill | Apply the graded Claude gate: never reuse subscription auth in a foreign client, never do competing-model work; occasional handoffs into the genuine `claude -p` are tolerated today (keep volume low). When in doubt, use Codex / GLM / Grok / Gemini. See [references/anthropic-terms.md](references/anthropic-terms.md) |

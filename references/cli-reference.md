@@ -834,6 +834,16 @@ Notes, all live-verified:
   1.1.0, not retested on 1.3.4 — run the Gemini lane sequentially (before or after the burst),
   cap it with a timeout, and retest on future agy releases. Reported upstream with the full repro
   matrix: github.com/google-antigravity/antigravity-cli/issues/573.
+- **agy-only parallel lanes are a separate case, and not a retest of that hang.** On 2026-11-01,
+  agy 1.3.x on one account ran 4 to 6 parallel agy processes with no other model CLI in the
+  burst (65 short vertical clips, one clip per call, model `gemini-4-argon-high`): 65 of 65
+  finished, 0 failures, about 5.7 minutes per clip on average. Each call used an `agy_run`-style
+  900 s deadline and one retry. A lane claimed an item with an atomic `mkdir locks/NN` plus an
+  `inflight/NN` file holding the lane PID, skipped output that already existed or an inflight
+  PID that was still alive, and removed both markers when done. The runner was
+  `setsid nohup bash runner.sh &`. The aggregate index was built once, after every lane
+  finished. One observation, not a guarantee. The sketch is in SKILL.md, "Batch jobs: parallel
+  agy lanes".
 - **Bound every run with `agy_run`.** agy is a Go binary, and Go programs ignore SIGALRM, so the
   usual macOS `perl -e 'alarm …; exec agy …'` wrapper does not stop it: a 3 s alarm let a 60 s
   run finish with exit 0 (1.3.4, 2026-10-14). `agy_run` runs agy in a process group led by a
@@ -1122,8 +1132,10 @@ script form with the same path checks ran against a stubbed `agy` in bash and `z
 an empty answer, a path outside the folder, a `..` path, a symlink and a missing
 `conversation_id`; each exited 3 without copying, and a valid path was copied.
 
-Run the image lane **solo / sequentially**: the agy parallel-burst hang
-(google-antigravity/antigravity-cli#573, seen on 1.1.0) applies to media runs too. No API key
+Run the image lane **solo / sequentially** beside other model CLIs: the agy parallel-burst hang
+(google-antigravity/antigravity-cli#573, seen on 1.1.0) applies to media runs in a multi-CLI
+burst too. The agy-only batch lanes in SKILL.md ("Batch jobs: parallel agy lanes") were a
+video-understanding run, not image generation, and they do not retest this hang. No API key
 and no OpenRouter are needed; the Google-account login covers it. agy has no native VIDEO tool.
 The OpenRouter `google/gemini-3-pro-image` path remains a separate, metered, operator-gated
 fallback, not a requirement.
@@ -1158,8 +1170,8 @@ crowd laughter):
 | GPT (Codex), Claude | Not tested in this pass | — |
 
 **Gemini recipe.** Put the clip alone in a freshly created private directory (re-encode 4K
-footage to ~540p first: smaller upload, same answer), make that directory the workspace, run it
-solo (the agy burst hang applies) and cap it with a timeout:
+footage to ~540p first: smaller upload, same answer), make that directory the workspace, keep
+it out of a multi-CLI burst (the agy burst hang applies) and cap it with a timeout:
 
 ```bash
 # fresh private workspace per clip: never reuse a shared dir (agy gets read access to all of it)
@@ -1177,7 +1189,7 @@ watch_clip() (   # subshell: its own EXIT trap, so each clip's workspace is remo
   printf '%s\n' "$out"
 )
 watch_clip input.mp4 watch-prompt.md
-# many clips: while IFS= read -r f <&3; do watch_clip "$f" watch-prompt.md; done 3< clips.txt
+# many clips, one after another: while IFS= read -r f <&3; do watch_clip "$f" watch-prompt.md; done 3< clips.txt
 ```
 
 `--mode plan --sandbox` keeps this analysis-only: on agy 1.1.0 print mode ran shell, file and
@@ -1185,7 +1197,9 @@ network tools unprompted (see the notes above), and a clip or prompt can carry m
 instructions. Verified 2026-10-09: with both flags the clip was still watched and transcribed,
 while a request to create a file in the workspace was refused. Tell it to only read `clip.mp4`, not to search or create files, to mark unclear words as
 `[unclear]`, and to say so if it cannot hear audio. For many clips, call `watch_clip` in a loop
-fed on a separate descriptor (as shown), so ffmpeg and agy cannot consume the list. Keep the prompt to watching the clip: a prompt
+fed on a separate descriptor (as shown), so ffmpeg and agy cannot consume the list. That loop
+is sequential. Parallel agy-only lanes for independent clips are a separate observation
+(SKILL.md, "Batch jobs: parallel agy lanes"), not a retest of the multi-CLI hang. Keep the prompt to watching the clip: a prompt
 that also asks it to list the directory or use another tool can end with `jetski: no output
 produced — a tool required the "mcp" permission that headless mode cannot prompt for` (seen
 2026-10-09; the same recipe with a watch-only prompt answered). On 1.3.4 such a run exits 0 with
@@ -1435,6 +1449,6 @@ structured output for the precise reason. When capturing a piped tool's exit thr
 | agy modifies files you only wanted reviewed | agy 1.1.x print mode ran tools unprompted (yolo-like); 1.3.x auto-denies them unless `permissions.allow` or `--dangerously-skip-permissions` allows them | Add `--mode plan` (advice-only) or `--sandbox`, and do not pass `--dangerously-skip-permissions` for reviews |
 | agy: `jetski: no output produced — a tool required the "mcp" permission …` | The prompt made agy reach for a tool that headless mode auto-denies (e.g. listing a directory), or a global rule in `~/.gemini/GEMINI.md` told the model to call an MCP tool first (seen 2026-10-14 with a memory server) | Keep the prompt to the task (e.g. watch only `clip.mp4`), add "do not call MCP or memory tools", and rerun; do not reach for `--dangerously-skip-permissions` |
 | agy image prompt ("call your generate_image tool") exits 0 with no image | agy 1.3.x: the root agent called no `generate_image` tool, made a shell call instead, and print mode denied it | Use `agy_image` (built-in image-generator subagent; the file is copied out of `~/.gemini/antigravity-cli/brain/<conversation_id>/` after a path check) |
-| agy `-p` hangs forever inside a parallel multi-CLI burst | agy 1.1.0 timing/load bug when 3+ other model CLIs run concurrently (solo/pairwise reliable; stagger insufficient) | Run the Gemini lane sequentially around the burst; always cap agy with a timeout |
+| agy `-p` hangs forever inside a parallel multi-CLI burst | agy 1.1.0 timing/load bug when 3+ other model CLIs run concurrently (solo/pairwise reliable; stagger insufficient) | Run the Gemini lane sequentially around the burst; always cap agy with a timeout. agy-only lanes for independent jobs are a separate observed case (SKILL.md, "Batch jobs: parallel agy lanes"), not a retest of this hang |
 | CLI missing or "not authenticated" | Not installed / logged out | Report it, skip that model; run `codex login` / `opencode auth login` / `kimi login` / `grok login` as needed — do not substitute another model silently. Exception: Grok's "not authenticated" from `grok models` is not conclusive — walk the Grok availability ladder first |
 | Long run hangs the shell tool | Tool-level timeout | Set an explicit timeout, or run in background and poll |
