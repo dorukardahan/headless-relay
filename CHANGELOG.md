@@ -4,6 +4,7 @@
 
 ### Added
 
+- Fable 5.2 lane: the new `fable_relay PROMPT-FILE` helper sends every Claude Fable 5.2 handoff as `claude-fable-5-2` at `max` effort (Fable 5.2 defaults to `medium`) and makes sure the prompt starts with the `ultrathink` keyword. It also sets `CLAUDE_CODE_EFFORT_LEVEL` for the child, because that variable outranks `--effort`. Prompts for this lane are always built with RePrompter first (`references/reprompter-relay.md`). Live-verified on Claude Code 2.1.322: a print-mode prompt containing `ultrathink` gets an `ultrathink_effort` attachment in its transcript, and the same prompt without it does not. `scripts/test-fable-target.py` covers the helper offline. The lane section warns that on plans where Fable bills to usage credits, `claude -p` bills without the consent prompt an interactive session shows.
 - `references/role-routing.md`: a generic, configurable template for routing roles (coding, judgment, exploration, review, swarm) to lanes, with a primary/fallback/third table, example invocations for the Codex, Claude, GLM (as a custom target) and Gemini lanes, the rule that reviewers and judges must come from a different provider family than the writer, and a general fallback order. Linked from the SKILL.md reference table.
 
 ### Fixed
@@ -12,6 +13,7 @@
 
 ### Documentation and safety
 
+- Claude lane: the `--model` full-name example is now `claude-fable-5-2` (Fable 5.2), replacing `claude-fable-5-1`. Live-verified 2026-11-12: `claude -p --model claude-fable-5-2 --effort max` answered, and `modelUsage` named that model.
 - Kimi preflight: the archived Python `kimi-cli` prints `kimi, version 1.x` and fails this lane with `Output format is only supported for print UI`; the Kimi Code CLI prints a bare version.
 - Kimi's free Adagio plan has no Kimi Code access, so native OAuth needs a paid membership; the metered Open Platform API key is the other login.
 - Kimi `auto` permissions are the "Never Ask" mode: sensitive-file access and dangerous commands are approved without asking. Only static deny rules still apply.

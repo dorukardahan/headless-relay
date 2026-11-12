@@ -1,6 +1,6 @@
 ---
 name: headless-relay
-description: Headless handoff guide for running other AI models from inside an agent session (any Agent Skills runtime - Claude Code, Codex, Grok Build, Cursor, OpenClaw, Hermes). Covers GPT (codex exec), GLM (opencode run or zcode --prompt), Kimi K3 (native kimi -p), Grok (grok -p), Gemini (Antigravity agy -p), and Claude (claude -p or a subagent) - inline vs file prompts, parallel multi-model consensus, Party/Council Mode across every safely available built-in and custom lane, JSON output, session resume, image/video generation, video understanding (watching a clip), provider-terms compliance. Use for "ask codex", "ask GLM", "ask Kimi", "ask grok", "ask gemini", "ask Claude", "second opinion", "cross-model review", "consensus", "party mode", "council mode", "ask everyone", "run all available models", "her şeyi dene", "hepsine sor", "compare models", "generate an image", "watch this video", "run headless", "ask another model".
+description: Headless handoff guide for running other AI models from inside an agent session (any Agent Skills runtime - Claude Code, Codex, Grok Build, Cursor, OpenClaw, Hermes). Covers GPT (codex exec), GLM (opencode run or zcode --prompt), Kimi K3 (native kimi -p), Grok (grok -p), Gemini (Antigravity agy -p), and Claude (claude -p or a subagent) - inline vs file prompts, parallel multi-model consensus, Party/Council Mode across every safely available built-in and custom lane, JSON output, session resume, image/video generation, video understanding (watching a clip), provider-terms compliance. Use for "ask codex", "ask GLM", "ask Kimi", "ask grok", "ask gemini", "ask Claude", "ask Fable", "second opinion", "cross-model review", "consensus", "party mode", "council mode", "ask everyone", "run all available models", "her şeyi dene", "hepsine sor", "compare models", "generate an image", "watch this video", "run headless", "ask another model".
 license: MIT. Complete terms in LICENSE.txt
 metadata: {"version": "3.2.0"}
 ---
@@ -696,6 +696,67 @@ claude_relay() {
 }
 ```
 
+### Fable 5.2 lane: RePrompter first, max effort, `ultrathink`
+
+Every relay to Claude Fable 5.2 goes through `fable_relay`, never through a bare `claude_relay` call:
+
+1. Build the prompt with RePrompter (Improve intent) first, even for a short review, and save it
+   to a file. The finished prompt must contain the word `ultrathink`, written plainly (not inside
+   quotes, brackets, a path or a command).
+2. Run `fable_relay PROMPT-FILE [extra claude args]`, for example
+   `fable_relay /tmp/fable-prompt.md --tools "" --output-format json`.
+
+`fable_relay` uses `claude-fable-5-2` at `max` effort and puts `ultrathink` on the first line when
+the prompt does not already start with it. Why each part:
+
+- **`max` effort.** Fable 5.2 defaults to `medium`. `max` is the deepest level, and Claude Code
+  applies it to that session only. The `CLAUDE_CODE_EFFORT_LEVEL` environment variable outranks
+  `--effort`, so the helper sets both for the child process; a parent shell that exports a lower
+  level cannot quietly win. A `maxEffortLevel` setting or an organization cap still lowers `max`
+  to the cap; with `json` output the warning goes only to the debug log.
+- **`ultrathink`.** Claude Code recognizes the keyword anywhere in a prompt and adds an in-context
+  instruction for deeper reasoning on that turn. This also happens in print mode: on Claude Code
+  2.1.322 a `claude -p` prompt with the word gets an `ultrathink_effort` attachment in its session
+  transcript, and the same prompt without it does not. Typed in the interactive terminal, the
+  word can also raise the turn to `xhigh`; at `max` the level stays `max`.
+  `CLAUDE_CODE_DISABLE_ULTRATHINK` turns the keyword off. Other phrases such as "think hard" are
+  plain text.
+- **RePrompter.** The relay carries whatever prompt it gets; see
+  [references/reprompter-relay.md](references/reprompter-relay.md).
+
+Overrides: `HEADLESS_RELAY_FABLE_MODEL` and `HEADLESS_RELAY_FABLE_EFFORT`. The model override also
+takes any other Claude model with a `max` level, for example `claude-opus-5-5`, when a workflow wants
+an Opus lane at the same settings (RePrompter prompt, `max`, `ultrathink`).
+Fable 5.2 costs $8/$40 per Mtok and `max` spends more thinking tokens, so keep to occasional
+second opinions, as the compliance gate above says. Depending on the plan and seat tier, Fable can
+bill to usage credits instead of the plan's included limits (the `/model` picker then shows
+"Requires usage credits" on the Fable row). An interactive session asks before that; `claude -p`
+never asks and bills it, so check the picker before you run this lane in a loop or a batch. Read the served model from `modelUsage` in
+`--output-format json`. The child still loads your global Claude Code hooks and settings, as any
+`claude -p` call does.
+
+```bash
+fable_relay() (
+  # Fable 5.2 lane: max effort and the ultrathink keyword on every call.
+  # Usage: fable_relay PROMPT-FILE [extra claude args, e.g. --output-format json]
+  f=${1:-}
+  if [ -z "$f" ] || [ ! -f "$f" ]; then
+    echo "fable_relay: usage: fable_relay PROMPT-FILE [claude args...]" >&2
+    exit 2
+  fi
+  shift
+  m=${HEADLESS_RELAY_FABLE_MODEL:-claude-fable-5-2}
+  e=${HEADLESS_RELAY_FABLE_EFFORT:-max}
+  p=$(cat "$f") || exit 2
+  case "$p" in
+    ultrathink|ultrathink[[:space:]]*) ;;
+    *) p="ultrathink
+$p" ;;
+  esac
+  CLAUDE_CODE_EFFORT_LEVEL=$e claude --model "$m" --effort "$e" -p "$p" "$@"
+)
+```
+
 Define `agy_run` and `agy_answer` once before any Gemini example. `agy_run` bounds an agy run for
 real; `agy_answer` also turns an empty answer into a failure. The Gemini commands below and the
 `agy_image` and `watch_clip` recipes use them. They need `python3` 3.9 or newer (the macOS system
@@ -1294,6 +1355,7 @@ harness is the orchestrator. Two ways to hand off to Claude, and they are NOT in
 |--------|-------------|
 | Native subagent (`model: "inherit"` only when the parent already runs the desired variant) | In-session, no subprocess, result returns straight to the orchestrator. When switching variants, select a supported explicit full model id instead of assuming an alias picks that variant. |
 | `claude_relay -p …` | When Claude must run truly parallel alongside the codex/opencode/grok subprocesses in one shell burst, or you need a clean JSON transcript with its own session id. Native model selection unless explicitly overridden. |
+| `fable_relay PROMPT-FILE …` | Every handoff to Claude Fable 5.2: RePrompter-built prompt, `max` effort, `ultrathink` (see the Fable 5.2 lane section). |
 
 Native selection is version- and policy-dependent, not a guarantee of the served model.
 The [current subagent docs](https://code.claude.com/docs/en/sub-agents) accept aliases, full model

@@ -23,7 +23,21 @@ deliberately contain no CLI mechanics, so the two skills cannot drift apart.
 See the "Deliver via headless-relay (post-output step)" section of RePrompter's
 SKILL.md.
 
+## Fable 5.2 lane: always reprompt first
+
+Every prompt to Claude Fable 5.2 is built with RePrompter first, with no exceptions for short
+asks, and goes out through `fable_relay` (see the Fable 5.2 lane section of SKILL.md). This is the
+orchestrating agent's own step: RePrompter's post-output delivery step still targets non-Claude
+models only.
+
+1. Run RePrompter (Improve intent) on the task and save the finished prompt to a file.
+2. Make sure the prompt contains the word `ultrathink`, written plainly. `fable_relay` adds it
+   as the first line when the prompt does not start with it, so the keyword is never missing.
+3. Run `fable_relay PROMPT-FILE`. It sends the prompt at `max` effort.
+
 ## When NOT to reprompt first
+
+The exceptions below do not apply to the Fable 5.2 lane.
 
 - Short factual asks ("what does this error mean") — relay directly.
 - Consensus runs where the SAME prompt must go to several models — reprompt once,
