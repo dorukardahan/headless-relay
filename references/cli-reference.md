@@ -76,6 +76,21 @@ codex exec --sandbox workspace-write \
   -c 'sandbox_workspace_write.network_access=true' "<task>"
 ```
 
+**`--sandbox` replaces a configured permissions profile.** This was checked on codex-cli 0.167.2
+(macOS) with a canary file. When `config.toml` sets `default_permissions` to a profile that denies
+files, `--sandbox workspace-write` (or `-c sandbox_mode="workspace-write"`) drops those denies,
+and the files become readable.
+
+- Under the profile, `sandbox_workspace_write.network_access` has no effect.
+- Network comes from `[permissions.<name>.network] enabled = true`.
+- The profile's `[permissions.<name>.network.domains]` allowlist is enforced only with
+  `--enable network_proxy`, an experimental feature in 0.167.2.
+
+For runs that read untrusted text with the network on, use
+`codex exec --enable network_proxy -c default_permissions="<profile>" -c approval_policy="never"`.
+SKILL.md Scenario D has the profile. `codex sandbox --enable network_proxy -P <profile> -- <cmd>`
+tests a profile without a model call.
+
 Models (GPT-6 Astra 2026-09-03; GPT-6 Sol and Luna 2026-09-22): `gpt-6-astra` remains
 the most capable frontier model, `gpt-6-sol` targets strong agentic coding at lower latency,
 and `gpt-6-luna` is the lighter high-volume option. Their Codex ids are exactly those slugs;
