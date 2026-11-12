@@ -726,7 +726,10 @@ the prompt does not already start with it. Why each part:
 
 Overrides: `HEADLESS_RELAY_FABLE_MODEL` (another Fable id) and `HEADLESS_RELAY_FABLE_EFFORT`.
 Fable 5.2 costs $8/$40 per Mtok and `max` spends more thinking tokens, so keep to occasional
-second opinions, as the compliance gate above says. Read the served model from `modelUsage` in
+second opinions, as the compliance gate above says. Depending on the plan and seat tier, Fable can
+bill to usage credits instead of the plan's included limits (the `/model` picker then shows
+"Requires usage credits" on the Fable row). An interactive session asks before that; `claude -p`
+never asks and bills it, so check the picker before you run this lane in a loop or a batch. Read the served model from `modelUsage` in
 `--output-format json`. The child still loads your global Claude Code hooks and settings, as any
 `claude -p` call does.
 
