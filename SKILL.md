@@ -724,7 +724,9 @@ the prompt does not already start with it. Why each part:
 - **RePrompter.** The relay carries whatever prompt it gets; see
   [references/reprompter-relay.md](references/reprompter-relay.md).
 
-Overrides: `HEADLESS_RELAY_FABLE_MODEL` (another Fable id) and `HEADLESS_RELAY_FABLE_EFFORT`.
+Overrides: `HEADLESS_RELAY_FABLE_MODEL` and `HEADLESS_RELAY_FABLE_EFFORT`. The model override also
+takes any other Claude model with a `max` level, for example `claude-opus-5-5`, when a workflow wants
+an Opus lane at the same settings (RePrompter prompt, `max`, `ultrathink`).
 Fable 5.2 costs $8/$40 per Mtok and `max` spends more thinking tokens, so keep to occasional
 second opinions, as the compliance gate above says. Depending on the plan and seat tier, Fable can
 bill to usage credits instead of the plan's included limits (the `/model` picker then shows
