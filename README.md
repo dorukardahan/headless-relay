@@ -84,6 +84,7 @@ lives in `references/reprompter-relay.md`.
 | `scripts/kimi_relay.py` | Kimi-only external watchdog, physical non-git cwd and empty skills; native CLI retains auth ownership |
 | `scripts/test-kimi-runtime.py` | Synthetic sh/bash lifecycle, path and argv regressions; no real Kimi/network |
 | `scripts/regression-claude-target.sh` / `scripts/test-claude-target.py` | Offline stdlib Python regression: executes the shipped Claude helper with an argv stub under sh/bash, synthetic settings/profiles, and missing/poisoned jq. Tests native delegation, opaque overrides (including printable `[1m]`), resume/error propagation, and negative mutations; no real Claude or network. |
+| `scripts/regression-fable-target.sh` / `scripts/test-fable-target.py` | Offline stdlib Python regression for the shipped `fable_relay` helper under sh/bash with a `claude` argv stub: Fable 5.2 model and `max` effort by default, `CLAUDE_CODE_EFFORT_LEVEL` forced for the child, `ultrathink` added exactly once, overrides, argument and exit-status passthrough, a missing prompt file, and negative mutations; no real Claude or network. |
 | `LICENSE.txt` | MIT license |
 
 ## Install

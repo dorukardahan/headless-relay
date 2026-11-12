@@ -1313,10 +1313,11 @@ silently or call the print-mode probe an authenticated subscription success.
 
 | Flag | Meaning |
 |------|---------|
-| `--model <model>` | Alias (`fable`, `opus`, `sonnet`) or full name (`claude-fable-5-1`); preserve any supported variant suffix verbatim. Availability is account/version-dependent. |
+| `--model <model>` | Alias (`fable`, `opus`, `sonnet`) or full name (`claude-fable-5-2`); preserve any supported variant suffix verbatim. Availability is account/version-dependent. |
 | `--output-format <fmt>` | `text` (default), `json` (single result), `stream-json` (NDJSON). |
 | `--input-format <fmt>` | `text` (default), `stream-json`. |
-| `--effort <level>` | `low\|medium\|high\|xhigh\|max`. |
+| `--effort <level>` | `low\|medium\|high\|xhigh\|max`. The `CLAUDE_CODE_EFFORT_LEVEL` environment variable outranks this flag. Fable 5.2 defaults to `medium`; the `fable_relay` helper sends `max`. |
+| `ultrathink` (word in the prompt) | Not a flag. Claude Code adds an in-context instruction for deeper reasoning on that turn, in print mode too (2.1.322: the transcript gains an `ultrathink_effort` attachment). In the interactive terminal it can also raise the turn to `xhigh`. `CLAUDE_CODE_DISABLE_ULTRATHINK` turns it off. |
 | `-c, --continue` | Continue the most recent conversation in the cwd. |
 | `-r, --resume [id]` | Resume by session id. |
 | `--fork-session` | On resume, create a new session id. |
