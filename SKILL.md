@@ -704,7 +704,11 @@ Every relay to Claude Fable 5.2 goes through `fable_relay`, never through a bare
    to a file. The finished prompt must contain the word `ultrathink`, written plainly (not inside
    quotes, brackets, a path or a command).
 2. Run `fable_relay PROMPT-FILE [extra claude args]`, for example
-   `fable_relay /tmp/fable-prompt.md --tools "" --output-format json`.
+   `fable_relay /tmp/fable-prompt.md --tools "" --strict-mcp-config --output-format json`.
+   For a prompt-only review, `--tools ""` removes the built-in tools but not the MCP servers in
+   your user config: on Claude Code 2.1.322 a `--tools ""` child still listed 33 MCP tools,
+   including a memory store's delete and import tools. `--strict-mcp-config` without
+   `--mcp-config` loads none, so the child had no tools at all. Your hooks still run.
 
 `fable_relay` uses `claude-fable-5-2` at `max` effort and puts `ultrathink` on the first line when
 the prompt does not already start with it. Why each part:
@@ -1114,6 +1118,56 @@ and it suppresses any config-driven approval escalation. Also note `codex exec` 
 behavior varies per machine — pass explicit flags, or add `--ignore-user-config` when you need
 machine-independent runs. OpenCode runs agentic with repo access in its default run mode.
 
+**When Codex reads untrusted text with the network on** (PR diffs, issues, web pages), the
+command above lets the model read every file your user can read: `.env` files, shell rc files
+that export keys, cloud credentials. A permissions profile can keep those unreadable and limit
+the network to the hosts the task needs. On codex-cli 0.167.2 (macOS) a test with a canary file
+showed:
+
+- `--sandbox workspace-write` (or `-c sandbox_mode="workspace-write"`) **replaces** the
+  `default_permissions` profile from `config.toml`. A `.env` file and a shell rc file that the
+  profile denied became readable.
+- Under a profile, `sandbox_workspace_write.network_access=true` does not open the network. The
+  profile's own `[permissions.<name>.network] enabled = true` does.
+- The profile's domain allowlist is enforced only with `--enable network_proxy`, an experimental
+  feature in 0.167.2. Without it, `example.com` answered 200. With it, that request failed while
+  `gh` calls to api.github.com still worked.
+
+Profile and command (use absolute paths; deny every file that holds a key):
+
+```toml
+[permissions.review-net]
+extends = ":workspace"
+
+[permissions.review-net.filesystem]
+"/Users/you/.zshrc" = "deny"
+"/Users/you/.zshenv" = "deny"
+
+[permissions.review-net.filesystem.":workspace_roots"]
+"**/.env" = "deny"
+"**/.env.local" = "deny"
+
+[permissions.review-net.network]
+enabled = true
+mode = "full"
+
+[permissions.review-net.network.domains]
+"api.github.com" = "allow"
+"github.com" = "allow"
+"codeload.github.com" = "allow"
+```
+
+```bash
+codex exec --enable network_proxy -c default_permissions="review-net" \
+  -c approval_policy="never" "review PR 123 with gh pr diff and flag correctness bugs"
+```
+
+`approval_policy="never"` matters when your config uses `on-request` with an auto-reviewer. That
+combination can re-run a blocked command outside the sandbox (see the escalation note in
+[references/cli-reference.md](references/cli-reference.md)). Check the profile without a model
+call: `codex sandbox --enable network_proxy -P review-net -- cat .env` must fail with
+`Operation not permitted`.
+
 **Grok is not the lane for repo- or diff-context work** — the `grok_relay` helper denies all tools
 and runs in an empty dir, so Grok never reads your repo (by design: it relays only the prompt you
 give it). For "read the repo / review the diff / run git", use Codex (above), Gemini, GLM, or
@@ -1412,7 +1466,7 @@ while a same-provider second opinion should stay in-session as a subagent.
 | You ran an OLD `grok` (pre-open-source) inside a real repo | Earlier shipped versions uploaded the whole repo + git history to xAI. Update grok; follow [SECURITY.md](SECURITY.md) to check your logs and rotate any exposed secrets. New calls via `grok_relay` relay only the prompt |
 | "Is the Grok lane read-only / local?" | No — Grok is a cloud model; your prompt goes to xAI. `grok_relay` keeps your other tools' config and grok's own globals out of the turn and denies tools, but never call it "read-only" or "local" |
 | Codex: `unexpected argument '--ask-for-approval'` | `codex exec` never prompts; drop the flag (Scenario D) |
-| Codex: "network access restricted" / `gh` fails | Add `--sandbox workspace-write -c 'sandbox_workspace_write.network_access=true'` (Scenario D) |
+| Codex: "network access restricted" / `gh` fails | Add `--sandbox workspace-write -c 'sandbox_workspace_write.network_access=true'`. If the run reads untrusted text, use a permissions profile with a domain allowlist instead, because `--sandbox` replaces the profile's file denies (Scenario D) |
 | Codex answer seems shallow | GPT-5.6 models default to LOW reasoning effort — pass `-c model_reasoning_effort="high"`/`"ultra"` explicitly |
 | Prompt with backticks / `$` mangled or runs as a command | Use the file + stdin form, not inline `"…"` |
 | Grok stderr shows `AuthorizationRequired` / `Skipping MCP tool` but stdout arrives | Cosmetic startup noise — pipe `2>/dev/null` |

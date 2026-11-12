@@ -13,6 +13,13 @@
 
 ### Documentation and safety
 
+- Codex Scenario D: a new note for runs that read untrusted text with the network on. Verified on codex-cli 0.167.2 (macOS) with a canary file:
+  - `--sandbox workspace-write` replaces the `default_permissions` profile from `config.toml`, so a `.env` file and a shell rc file that the profile denied became readable.
+  - Under a profile, `sandbox_workspace_write.network_access` has no effect. The profile's own `network.enabled` opens the network.
+  - The profile's domain allowlist is enforced only with `--enable network_proxy`.
+
+  Scenario D now shows a profile that denies key files and allows only GitHub hosts. It runs with `-c approval_policy="never"`, so an auto-reviewer cannot re-run a blocked command outside the sandbox. The example profile was tested as written: `.env` and `~/.zshrc` were denied, `gh` worked, and example.com was blocked. The troubleshooting row and `references/cli-reference.md` point to it.
+- Fable 5.2 lane: the prompt-only example now adds `--strict-mcp-config`. On Claude Code 2.1.322, a `--tools ""` child still listed 33 MCP tools from the user config, including a memory store's delete and import tools. With `--strict-mcp-config` it had none.
 - Claude lane: the `--model` full-name example is now `claude-fable-5-2` (Fable 5.2), replacing `claude-fable-5-1`. Live-verified 2026-11-12: `claude -p --model claude-fable-5-2 --effort max` answered, and `modelUsage` named that model.
 - Kimi preflight: the archived Python `kimi-cli` prints `kimi, version 1.x` and fails this lane with `Output format is only supported for print UI`; the Kimi Code CLI prints a bare version.
 - Kimi's free Adagio plan has no Kimi Code access, so native OAuth needs a paid membership; the metered Open Platform API key is the other login.
