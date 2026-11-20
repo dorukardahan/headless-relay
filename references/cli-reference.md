@@ -12,7 +12,8 @@ unverifiable shipped binary, then re-verified 2026-08-14 on grok 1.0.3 (grok-4.6
 2026-07-08 on agy 1.1.0 and refreshed 2026-09-21 on agy 1.1.1 (`agy models` listed Gemini 3.8 Flash as the current top Gemini Flash tier). 2026-10-09 refresh: opencode 1.18.35, zcode CLI 0.16.9 (ZCode app 3.14.5), grok 1.0.50 and agy
 1.1.x re-checked, plus a new [Video understanding](#video-understanding-watching-a-clip) section
 (which lanes can actually watch a local clip). 2026-11-20 model refresh: GPT-6.2 Astra / Sol
-(listed by `codex debug models` on codex-cli 0.171.0; no model turn run), Gemini 4 Carbon / Hydrogen /
+(listed by `codex debug models` on codex-cli 0.171.0; `codex exec` answered on both at `high`
+and `xhigh`), Gemini 4 Carbon / Hydrogen /
 Neon (Neon and Hydrogen answered a print-mode probe on agy 1.2.7), Claude Sonnet 5.5 / Haiku 5.5
 CLI version gates, and Kimi K3.1 Pro. Flags drift — re-check `--help` when a command errors with
 `unexpected argument`.
@@ -99,7 +100,8 @@ Models, newest first:
 - **GPT-6.2 Astra and Sol (2026-11-17).** `gpt-6.2-astra` is the most capable model, for the
   hardest coding and research work; `gpt-6.2-sol` is the everyday coding and review model.
   Codex added both to its bundled catalog in codex-cli 0.169.1, and in 0.171.0 `gpt-6.2-sol` is
-  the default catalog selection. Older CLIs do not list them: codex-cli 0.144.1 lists only the
+  the default catalog selection. Live-verified 2026-11-20 on 0.171.0: a `codex exec` probe
+  answered on both ids at `high` and `xhigh`. Older CLIs do not list them: codex-cli 0.144.1 lists only the
   5.x ids. In the 0.171.0 bundled catalog both default to `low` effort and accept
   `low | medium | high | xhigh | max | ultra`. The Codex context window is 500K for 6.2 Sol and
   272K for 6.2 Astra; the API's 1.05M window is a different surface. In the API, unlike GPT-6
