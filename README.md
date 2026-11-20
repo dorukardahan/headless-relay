@@ -195,6 +195,14 @@ Claude Code **2.1.280+**. An installed 2.1.260 rejects it with HTTP 400, so do n
 `--model` means the requested model actually ran: verify `modelUsage` in the CLI's JSON result.
 Neither the local Claude Code installation nor subscription auth is changed by this docs update.
 
+2026-11-20 model refresh: OpenAI's `gpt-6.2-sol` and `gpt-6.2-astra` (2026-11-17) need
+codex-cli 0.169.1+ and stay catalog-gated like the earlier 6.x ids; GPT-6.1 Sol/Terra are
+documented too. Antigravity adds Gemini 4 Hydrogen and Neon (paid Pro/Ultra, `xhigh` effort) and
+Carbon (Ultra/Enterprise). The Claude lane notes the Sonnet 5.5, Haiku 5.5 and Fable 5.2 version
+gates and the safety-classifier fallback that can swap the served model. Kimi K3.1 Pro is
+documented, but the relay default stays `kimi-code/k3` until a K3.1 CLI alias is verified. The
+runnable examples and helper defaults are unchanged.
+
 2026-10-09 update: a live test of video understanding on the same phone clips. Gemini 3.8 Flash
 through `agy` watched them (about one frame per second plus a speech transcript); GLM-5.3-Flash
 saw frames but no speech, and only through the Coding Plan API's `video_url` part, because

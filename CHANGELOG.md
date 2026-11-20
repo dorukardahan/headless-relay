@@ -13,6 +13,12 @@
 
 ### Documentation and safety
 
+- Model refresh (2026-11-20). Helper defaults and runnable examples are unchanged; only the model notes and preflight guidance move.
+  - Codex: `gpt-6.2-astra` and `gpt-6.2-sol` (released 2026-11-17) are documented as the newest catalog-gated ids. Codex added them in codex-cli 0.169.1. In the 0.171.0 bundled catalog both default to `low` effort, and the Codex context is 500K for 6.2 Sol and 272K for 6.2 Astra. In the API the 6.2 models do not accept `none` effort. GPT-6.1 Sol/Terra are listed too. Live-verified 2026-11-20 on codex-cli 0.171.0 (Linux, ChatGPT login): `codex debug models` lists both ids (6.2 Sol 500K, 6.2 Astra 272K, both `low`), and `codex exec` answered on each at `high` and `xhigh` effort.
+  - Antigravity: Gemini 4 Carbon (Ultra/Enterprise), Hydrogen and Neon (paid Pro/Ultra, `low|medium|high|xhigh`). Neon and Hydrogen answered one-shot print probes on agy 1.2.7; agy's JSON has no served-model field. The media recipes keep the tested Gemini 3.8 Flash pin.
+  - Claude: minimum Claude Code versions for Sonnet 5.5 (2.1.284), Haiku 5.5 (2.1.293) and Fable 5.2 (2.1.321), and the safety-classifier fallback that can serve a flagged request on Opus 4.8, Opus 5 or Sonnet 5. The Fable lane says to report the model `modelUsage` names.
+  - Kimi: K3.1 Pro (2026-10-23) and the remapped `kimi-for-coding` aliases are documented. The default stays `kimi-code/k3`, because the CLI docs publish no K3.1 alias and a mistyped id falls back to K2.8 Preview without thinking.
+  - GLM: GLM-5.3 is still the newest Coding Plan flagship; `glm-5.2`/`glm-5.1` requests are routed to 5.3.
 - Codex Scenario D: a new note for runs that read untrusted text with the network on. Verified on codex-cli 0.167.2 (macOS) with a canary file:
   - `--sandbox workspace-write` replaces the `default_permissions` profile from `config.toml`, so a `.env` file and a shell rc file that the profile denied became readable.
   - Under a profile, `sandbox_workspace_write.network_access` has no effect. The profile's own `network.enabled` opens the network.

@@ -11,7 +11,11 @@ global-rule leak (Claude/Cursor compat from `$HOME` + grok's own `~/.grok/AGENTS
 unverifiable shipped binary, then re-verified 2026-08-14 on grok 1.0.3 (grok-4.6 became the CLI default 2026-08-12; all helper flags intact, live relay smoke green); Antigravity section verified
 2026-07-08 on agy 1.1.0 and refreshed 2026-09-21 on agy 1.1.1 (`agy models` listed Gemini 3.8 Flash as the current top Gemini Flash tier). 2026-10-09 refresh: opencode 1.18.35, zcode CLI 0.16.9 (ZCode app 3.14.5), grok 1.0.50 and agy
 1.1.x re-checked, plus a new [Video understanding](#video-understanding-watching-a-clip) section
-(which lanes can actually watch a local clip). Flags drift — re-check `--help` when a command errors with
+(which lanes can actually watch a local clip). 2026-11-20 model refresh: GPT-6.2 Astra / Sol
+(listed by `codex debug models` on codex-cli 0.171.0; `codex exec` answered on both at `high`
+and `xhigh`), Gemini 4 Carbon / Hydrogen /
+Neon (Neon and Hydrogen answered a print-mode probe on agy 1.2.7), Claude Sonnet 5.5 / Haiku 5.5
+CLI version gates, and Kimi K3.1 Pro. Flags drift — re-check `--help` when a command errors with
 `unexpected argument`.
 
 ## Contents
@@ -34,7 +38,7 @@ no argument is given (or the argument is `-`). If both are supplied, stdin is ap
 
 | Flag | Meaning |
 |------|---------|
-| `-m, --model <MODEL>` | Model id, e.g. `gpt-6-sol` / `gpt-6-astra` (or `gpt-5.6-sol` if new ids are not on the account). Check with `codex debug models` (JSON catalog). Do not run `codex models` — that starts a session. Omit to use the `~/.codex/config.toml` default. |
+| `-m, --model <MODEL>` | Model id, e.g. `gpt-6.2-sol` / `gpt-6.2-astra` (or an older listed id such as `gpt-6-astra` or `gpt-5.6-sol` if the new ids are not on the account). Check with `codex debug models` (JSON catalog). Do not run `codex models` — that starts a session. Omit to use the `~/.codex/config.toml` default. |
 | `-c, --config <key=value>` | Override a config value (TOML). E.g. `-c model_reasoning_effort="ultra"`. |
 | `-s, --sandbox <MODE>` | `read-only` (default), `workspace-write`, `danger-full-access`. |
 | `--dangerously-bypass-approvals-and-sandbox` | No sandbox. EXTREMELY DANGEROUS; isolated containers only. |
@@ -91,25 +95,41 @@ For runs that read untrusted text with the network on, use
 SKILL.md Scenario D has the profile. `codex sandbox --enable network_proxy -P <profile> -- <cmd>`
 tests a profile without a model call.
 
-Models (GPT-6 Astra 2026-09-03; GPT-6 Sol and Luna 2026-09-22): `gpt-6-astra` remains
-the most capable frontier model, `gpt-6-sol` targets strong agentic coding at lower latency,
-and `gpt-6-luna` is the lighter high-volume option. Their Codex ids are exactly those slugs;
-API access/pricing and ChatGPT subscription quotas are different surfaces. The GPT-5.6 family remains available:
+Models, newest first:
+
+- **GPT-6.2 Astra and Sol (2026-11-17).** `gpt-6.2-astra` is the most capable model, for the
+  hardest coding and research work; `gpt-6.2-sol` is the everyday coding and review model.
+  Codex added both to its bundled catalog in codex-cli 0.169.1, and in 0.171.0 `gpt-6.2-sol` is
+  the default catalog selection. Live-verified 2026-11-20 on 0.171.0: a `codex exec` probe
+  answered on both ids at `high` and `xhigh`. Older CLIs do not list them: codex-cli 0.144.1 lists only the
+  5.x ids. In the 0.171.0 bundled catalog both default to `low` effort and accept
+  `low | medium | high | xhigh | max | ultra`. The Codex context window is 500K for 6.2 Sol and
+  272K for 6.2 Astra; the API's 1.05M window is a different surface. In the API, unlike GPT-6
+  Sol/Luna, both 6.2 models reject `none` effort.
+- **GPT-6.1 Sol (2026-09-29) and GPT-6.1 Terra (2026-10-26):** `gpt-6.1-sol` (500K in the
+  0.171.0 Codex catalog) and `gpt-6.1-terra`, the cheaper middle tier. No GPT-6.1 Astra shipped.
+- **GPT-6 (Astra 2026-09-03; Sol and Luna 2026-09-22):** `gpt-6-astra`, `gpt-6-sol`,
+  `gpt-6-luna` (Luna has no `ultra` tier).
+
+The Codex ids are exactly those slugs. API access/pricing and ChatGPT subscription quotas are
+different surfaces. The GPT-5.6 family remains available:
 `gpt-5.6-sol` (high-capability, broader access), `gpt-5.6-terra` (balanced), `gpt-5.6-luna`
 (fast/affordable); `gpt-5.5` and `gpt-5.4` moved to legacy. Check enrollment with
 `codex debug models` (JSON catalog; `--bundled` skips refresh). Do **not** run
 `codex models`: on the 0.144 series that is not a catalog subcommand, so it starts an
 interactive session with the leftover words as the prompt. If the catalog JSON does not
-contain the desired GPT-6 slug, that account is not shown as enrolled — keep a listed
-fallback such as `gpt-5.6-sol` instead of forcing an unlisted id.
+contain the desired GPT-6.x slug, that account or CLI version does not offer it — keep a
+listed fallback (an older 6.x id, or `gpt-5.6-sol`) instead of forcing an unlisted id.
 Reasoning effort ladder is `low | medium | high | xhigh | max | ultra` — `ultra` is
 "maximum reasoning with automatic task delegation" (codex may fan out its own subagents).
-Astra's documented API effort set is `low | medium | high | xhigh | max` (no `ultra`);
-Sol/Luna additionally accept `none` in the API. Codex's `ultra` is a product tier with
-automatic delegation, not an API reasoning value. The public API's 1.05M context for
-GPT-6 does **not** mean this CLI/account has a 1.05M window; check its live metadata.
+GPT-6 Astra's documented API effort set is `low | medium | high | xhigh | max` (no `ultra`);
+GPT-6 Sol/Luna additionally accept `none` in the API, and the 6.2 models do not. Codex's
+`ultra` is a product tier with automatic delegation, not an API reasoning value. The public
+API's 1.05M context for GPT-6.x does **not** mean this CLI/account has a 1.05M window; check
+its live metadata.
 Two load-bearing notes, originally live-verified on 0.144.0 for the 5.6 family: those models
-DEFAULT TO `low` effort, so pass a catalog-listed model plus
+DEFAULT TO `low` effort (the 0.171.0 catalog sets the same `low` default for 6.2 Astra/Sol,
+6.1 Sol/Terra and 6 Astra), so pass a catalog-listed model plus
 `-c model_reasoning_effort="high"` / `"xhigh"` / `"max"` explicitly for
 review-grade output; and the 0.142.x exec flag semantics are unchanged
 (`--ask-for-approval` still rejected, network still requires the `-c` override above).
@@ -145,7 +165,10 @@ sit under the default context anyway.
 GLM-5.3 (launched 2026-08-14; same 743B base as 5.2, gains from scaled post-training) is live
 on the Coding Plan — `zai-coding-plan/glm-5.3` smoke-verified via `opencode run` the same day.
 Heads-up for API users: the new endpoint no longer allows disabling thinking (efforts are
-low/high/max only) — a breaking change for apps that ran with thinking off.
+low/high/max only) — a breaking change for apps that ran with thinking off. As of 2026-11-20
+GLM-5.3 is still Z.ai's newest flagship (no GLM-5.4/6 id is served), and the Coding Plan
+overview says requests for `glm-5.2` / `glm-5.1` are routed to GLM-5.3 and `glm-4.7` to
+GLM-5.3-Flash, so an old pin no longer selects the old model.
 
 Do not use `-f`/`--file` for prompt attachment in scripts. Pipe on stdin instead. Source-checked
 on 1.18.35 (`packages/opencode/src/cli/cmd/run.ts`): without `--attach`, `run -f` labels every file
@@ -255,6 +278,17 @@ The official aliases currently include `kimi-code/k3`, `kimi-code/kimi-for-codin
 the API-only id `k3`, the OpenCode selector `kimi-for-coding/k3`, or Claude Code's special
 `k3[1m]` syntax to native `kimi -m`. K3 defaults to `high` reasoning; CLI 0.27.0 has no headless
 reasoning-effort flag.
+
+**K3.1 Pro (2026-10-23).** Kimi Code's newest model, with API model ids `k3.1-pro` and
+`k3.1-pro-highspeed` (same model, about 2–3× faster, about 2× quota). It runs in thinking mode
+only (effort `low | high | max`, default `high`); a request with thinking off is rejected. Per
+the [model page](https://www.kimi.com/code/docs/en/kimi-code/models.html), `kimi-for-coding` is
+now K2.8 Preview, `kimi-for-coding-highspeed` is K2.7 Code Highspeed, and `k3-256k` is a 256K
+variant of K3. The CLI docs do not publish a native `kimi-code/…` alias for K3.1 Pro: select it
+with `/model` once, then pass the alias your own config shows. Do not construct one by hand,
+because the same page warns that a mistyped model id falls back to K2.8 Preview without thinking
+instead of failing. The relay default stays `kimi-code/k3` until a K3.1 alias is verified on a
+real login.
 
 Structured output is JSONL, not a single result object:
 
@@ -830,6 +864,26 @@ with `"Gemini 4 Argon (High)"` and with `--model gemini-4-argon --effort low|med
 (available: low, medium, high)`; the JSON has `status: "ERROR"` and the message in `error`.
 Gemini 3.1 Pro was not in the Ultra menu either.
 
+November 2026 brought three more Gemini 4 models to Antigravity:
+
+| Model | Released | Antigravity plans | Thinking levels | Role |
+|-------|----------|-------------------|-----------------|------|
+| Gemini 4 Carbon (`gemini-4-carbon`) | 2026-11-10 | Google AI Ultra, Enterprise | low, medium, high | Strongest model, long-horizon work |
+| Gemini 4 Hydrogen (`gemini-4-hydrogen`) | 2026-11-12 | paid Google AI Pro and Ultra | low, medium, high (default), xhigh | Fast everyday model, the Flash successor |
+| Gemini 4 Neon (`gemini-4-neon`) | 2026-11-18 | paid Google AI Pro and Ultra | low, medium, high (default), xhigh | Between Hydrogen and Carbon; replaces Argon in the Gemini app |
+
+On 2026-11-20 `agy models` on agy 1.2.7 (one account) listed `gemini-4-neon-low|medium|high|xhigh`,
+`gemini-4-hydrogen-low|medium|high|xhigh`, `gemini-4-argon-low|medium|high`, `gemini-3.8-flash-*`,
+`claude-opus-5-5-*`, `claude-sonnet-5-5-*` and `gpt-oss-120b-medium`, but no Carbon. On a Pro account,
+Carbon is reported greyed out in the interactive `/model` picker and absent from `agy models`,
+which lists only selectable models. One-shot print probes answered with `--model gemini-4-neon-high`,
+`--model gemini-4-hydrogen-high` and `--model gemini-4-neon --effort xhigh`. agy's JSON result
+has no served-model field (`usage` holds only token counts), so the requested id is all a run
+can report. Antigravity's Orchestrator (Carbon or Neon planning, Hydrogen executing) is a model
+picker option, not a lane this skill drives. The recipes below keep `"Gemini 3.8 Flash (High)"`
+because the image and video-watching checks were run on it; Hydrogen and Neon were not
+re-tested on those recipes.
+
 Notes, all live-verified:
 - **Print mode auto-denies tools on 1.3.4.** A shell command, a file write and a URL read were
   each refused because "headless mode cannot prompt". The run still **exits 0** with
@@ -1025,7 +1079,7 @@ default mode needs no `OPENAI_API_KEY`; a CLI fallback `scripts/image_gen.py` us
 which generated a blue-circle PNG into the target dir. Output also mirrors to
 `~/.codex/generated_images/<session>/exec-<uuid>.png`.
 The copy-paste image pin below is the **tested** `gpt-5.6-sol`. Catalog presence of
-`gpt-6-sol`, `gpt-6-luna`, or `gpt-6-astra` is not image-gen proof for those ids.
+`gpt-6.2-sol`, `gpt-6.2-astra`, `gpt-6.1-sol` or the GPT-6 ids is not image-gen proof for those ids.
 
 ```bash
 cd /path/to/output-dir
@@ -1326,6 +1380,19 @@ PY
 Treat any nonzero/timeout/mismatched `modelUsage` as unavailable; do not fall back
 silently or call the print-mode probe an authenticated subscription success.
 
+Minimum Claude Code versions for the current models, per the
+[model configuration docs](https://code.claude.com/docs/en/model-config): Opus 5.5 2.1.280,
+Sonnet 5.5 2.1.284, Haiku 5.5 2.1.293, Fable 5.2 2.1.321. On the Anthropic API the `opus`,
+`sonnet` and `haiku` aliases resolve to the 5.5 models, and `fable` resolves to Fable 5.2
+(Fable 5 in Claude apps gateway sessions). The same probe shape works for any of these ids;
+change the model id and the `modelUsage` check together.
+
+**Content-based fallback changes the served model.** Fable models, Opus 5.5, Sonnet 5.5 and
+Opus 5 run with safety classifiers. A request flagged for cybersecurity re-runs on Opus 4.8
+(Sonnet 5 for Sonnet 5.5), and one flagged for biology re-runs on Opus 5 (Sonnet 5.5 refuses
+instead). Security reviews are the most likely relay prompts to trip this. When `modelUsage`
+names a fallback model, report that model as the one that answered, not the requested one.
+
 | Flag | Meaning |
 |------|---------|
 | `--model <model>` | Alias (`fable`, `opus`, `sonnet`) or full name (`claude-fable-5-2`); preserve any supported variant suffix verbatim. Availability is account/version-dependent. |
@@ -1428,7 +1495,7 @@ structured output for the precise reason. When capturing a piped tool's exit thr
 | Codex behaves differently on another machine (writes/network that "shouldn't" work) | exec loads `~/.codex/config.toml`; `on-request` + auto-reviewer configs can escalate failed commands out of the sandbox | Pass explicit `--sandbox`/`-c` flags, or `--ignore-user-config` for reproducible runs |
 | Codex "network access restricted", `gh`/`curl` fail | `workspace-write` blocks network by default | Add `-c 'sandbox_workspace_write.network_access=true'` |
 | Codex stops with a clarifying question instead of reviewing | Default read-only sandbox blocked a command it needed | Escalate sandbox only as far as needed; or pre-fetch data into the prompt file |
-| Codex answer seems shallow on a 5.6 / 6 model | GPT-5.6 models default to LOW reasoning effort; Astra may still need an explicit effort pin | Pass `-c model="gpt-6-astra"` (or `gpt-5.6-sol`) and `-c model_reasoning_effort="high"` / `"xhigh"` / `"max"` (or `"ultra"` on 5.6) explicitly (or pin it in config.toml) |
+| Codex answer seems shallow on a 5.6 / 6.x model | GPT-5.6 and the GPT-6.x catalog entries (6.2 Astra/Sol included) default to LOW reasoning effort | Pass a listed model such as `-c model="gpt-6.2-sol"` (or `gpt-5.6-sol`) and `-c model_reasoning_effort="high"` / `"xhigh"` / `"max"` (or `"ultra"` on 5.6) explicitly (or pin it in config.toml) |
 | Prompt with backticks / `$` / newlines mangled or executed | Shell interpreted the inline `"…"` | Write to a file; feed via stdin, `--prompt-file`, or a quoted `"$(cat file)"` |
 | You ran an old, pre-2026-07-15 Grok Build in a real repo | Older versions bundled + uploaded the whole tracked repo + git history to xAI GCS (see the data-egress section above; the path is gone from source in the open-sourced release) | Follow [../SECURITY.md](../SECURITY.md) to check logs and rotate any exposed secrets |
 | "Is Grok read-only / local / safe?" | No — it's a cloud model like the others. The whole-repo upload is gone per the 2026-07-15 source audit; the global-rule leak and the unverifiable binary remain | Never present Grok as local; run it through `grok_relay`'s hermetic env-i + empty-HOME + clean-temp-GROK_HOME shape either way |
