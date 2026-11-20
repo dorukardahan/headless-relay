@@ -81,6 +81,7 @@ lives in `references/reprompter-relay.md`.
 | `scripts/catalog_watchdog.py` | Process-group watchdog used by the catalog (timeout / INT / TERM / HUP). After a normal CLI exit it does not `killpg` — that pgid could already be reused. Secrets stay out of argv. |
 | `scripts/regression-model-pins.sh` | Static tripwire: fails if docs teach `codex models` as a catalog (that starts a session on 0.144) |
 | `scripts/regression-kimi-target.sh` | Static tripwire for native Kimi routing/auth separation; not runtime proof |
+| `scripts/regression-agy-readonly.sh` | Offline bash regression for the Gemini lane: runs the shipped `agy_answer` with an `agy` argv stub (the `AGY_RO` rules come first; `--settings`, `--mode`, `--output-format` and `--` are refused) and checks that `watch_clip`, Party Mode and the agy batch pass `AGY_RO`; no model calls |
 | `scripts/kimi_relay.py` | Kimi-only external watchdog, physical non-git cwd and empty skills; native CLI retains auth ownership |
 | `scripts/test-kimi-runtime.py` | Synthetic sh/bash lifecycle, path and argv regressions; no real Kimi/network |
 | `scripts/regression-claude-target.sh` / `scripts/test-claude-target.py` | Offline stdlib Python regression: executes the shipped Claude helper with an argv stub under sh/bash, synthetic settings/profiles, and missing/poisoned jq. Tests native delegation, opaque overrides (including printable `[1m]`), resume/error propagation, and negative mutations; no real Claude or network. |
@@ -103,16 +104,16 @@ agent's skills directory:
 | Nous Research Hermes | `~/.hermes/skills/headless-relay/` (also scans `~/.agents/skills/`) |
 | Cursor, ZCode, and other agentskills.io-compatible runtimes | check your agent's skills directory convention; the skill has no platform-specific syntax |
 
-Stable release: [v3.2.0](https://github.com/dorukardahan/headless-relay/releases/tag/v3.2.0).
+Stable release: [v3.3.0](https://github.com/dorukardahan/headless-relay/releases/tag/v3.3.0).
 See [CHANGELOG.md](CHANGELOG.md) for changes, verification and limitations.
 
 Example (pinned release, including all helper scripts):
 
 ```bash
-git clone --branch v3.2.0 --depth 1 https://github.com/dorukardahan/headless-relay.git ~/.claude/skills/headless-relay
+git clone --branch v3.3.0 --depth 1 https://github.com/dorukardahan/headless-relay.git ~/.claude/skills/headless-relay
 ```
 
-To track unreleased development instead, omit `--branch v3.2.0 --depth 1`.
+To track unreleased development instead, omit `--branch v3.3.0 --depth 1`.
 
 ## Requirements
 
@@ -200,8 +201,12 @@ codex-cli 0.169.1+ and stay catalog-gated like the earlier 6.x ids; GPT-6.1 Sol/
 documented too. Antigravity adds Gemini 4 Hydrogen and Neon (paid Pro/Ultra, `xhigh` effort) and
 Carbon (Ultra/Enterprise). The Claude lane notes the Sonnet 5.5, Haiku 5.5 and Fable 5.2 version
 gates and the safety-classifier fallback that can swap the served model. Kimi K3.1 Pro is
-documented, but the relay default stays `kimi-code/k3` until a K3.1 CLI alias is verified. The
-runnable examples and helper defaults are unchanged.
+documented, but the relay default stays `kimi-code/k3` until a K3.1 CLI alias is verified.
+
+v3.3.0 also re-verifies the Gemini lane on agy 1.5.13. Since agy 1.5.7 a headless `agy -p` run
+starts in Auto mode and edits workspace files without asking, so every answer-only Gemini example
+now passes `--settings "$AGY_RO"` (deny rules for file writes, shell commands, URL fetches and MCP
+tools; file reads still work), and `watch_clip` no longer uses `--mode plan`.
 
 2026-10-09 update: a live test of video understanding on the same phone clips. Gemini 3.8 Flash
 through `agy` watched them (about one frame per second plus a speech transcript); GLM-5.3-Flash

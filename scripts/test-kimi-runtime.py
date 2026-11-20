@@ -255,6 +255,7 @@ opencode() { :; }
 grok_relay() { :; }
 agy() { :; }
 agy_run() { :; }
+AGY_RO='{}'
 kimi_relay_file() { printf 'partial answer'; return "$KIMI_TEST_RC"; }
 '''
         for shell in ('sh', 'bash'):
