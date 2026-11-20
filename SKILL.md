@@ -576,12 +576,12 @@ substitute a different model to fill the gap.
 | Model | Binary check | Auth / plan check |
 |-------|--------------|-------------------|
 | Kimi K3 | `command -v kimi` AND `kimi --version` prints a bare version such as `2.1.1`. The archived Python `kimi-cli` prints `kimi, version 1.x` and cannot run this lane | `kimi doctor` validates configuration but not OAuth. Let the requested call fail once if the session is absent, then ask the user to run `kimi login`; never inspect or copy Kimi's token files |
-| GPT (Codex) | `command -v codex` | fails fast with an auth error when logged out (`codex login`). Pin only an id listed by this account's `codex debug models` JSON catalog (`gpt-6-sol`, `gpt-6-luna`, or `gpt-6-astra` when enrolled); otherwise keep `-c model="gpt-5.6-sol"` if it is listed. Do not run `codex models` — on 0.144 that starts an interactive prompt. |
+| GPT (Codex) | `command -v codex` | fails fast with an auth error when logged out (`codex login`). Pin only an id listed by this account's `codex debug models` JSON catalog: `gpt-6.2-sol` / `gpt-6.2-astra` (codex-cli 0.169.1+; older CLIs do not list them), then older listed 6.x ids (`gpt-6.1-sol`, `gpt-6-astra`, …); otherwise keep `-c model="gpt-5.6-sol"` if it is listed. Do not run `codex models` — on 0.144 that starts an interactive prompt. |
 | GLM via OpenCode | `command -v opencode` AND `opencode --version` prints a version (an old CLI binary can be killed silently by macOS; the desktop app does not update it — see [references/cli-reference.md](references/cli-reference.md)) | `opencode auth list` shows a Z.AI credential |
 | GLM via ZCode | `command -v zcode` (add a PATH wrapper if only the app is installed) | `~/.zcode/cli/config.json` exists or `ZCODE_API_KEY` is set. `zcode login` is currently broken, and app 3.14.5 needs a small symlink shim before any call works (error `无法定位 CLI ZCode Built-in Provider Config`, "cannot locate the built-in provider config") — see [references/cli-reference.md](references/cli-reference.md) |
 | Grok | `command -v grok` | Run `grok models` (catalog fetch, no model turn). A model list proves the CLI authenticated, even with a stale "not authenticated" header, but it does **not** prove `grok-4.7` access: require an exact `grok-4.7` entry under `Available models:` before setting `GROK_RELAY_MODEL=grok-4.7` for either helper. Otherwise retain the 4.6 default only if the list has `grok-4.6`, or set `GROK_RELAY_MODEL=grok-4.5` if only 4.5 is listed. If none is listed, skip the Grok lane; never guess a pin. With no model list, follow [the auth ladder](references/cli-reference.md). |
-| Gemini via Antigravity | `command -v agy`; `agy --version` (print-mode behavior changed in 1.3.x) | `agy models` lists the model menu when logged in. The menu differs per account (Gemini 4 Argon is Ultra/Enterprise only), so check it on the account you use; the default model comes from the user's Antigravity config |
-| Claude | `command -v claude`; `claude --version` | `claude-opus-5-5` requires Claude Code 2.1.280+; 2.1.260 returns HTTP 400. Confirm signed-in status on the intended profile and the actual `modelUsage` id after a bounded run. Keep the compliance gate below. |
+| Gemini via Antigravity | `command -v agy`; `agy --version` (print-mode behavior changed in 1.3.x) | `agy models` lists the model menu when logged in. The menu differs per plan (Gemini 4 Carbon is Ultra/Enterprise only; Gemini 4 Neon and Hydrogen need a paid Pro or Ultra plan), so check it on the account you use; the default model comes from the user's Antigravity config |
+| Claude | `command -v claude`; `claude --version` | `claude-opus-5-5` requires Claude Code 2.1.280+ (2.1.260 returns HTTP 400), `claude-sonnet-5-5` 2.1.284+, `claude-haiku-5-5` 2.1.293+ and `claude-fable-5-2` 2.1.321+. Confirm signed-in status on the intended profile and the actual `modelUsage` id after a bounded run. Keep the compliance gate below. |
 
 Rules:
 - Example model ids in this skill are copy-paste pins, not a live menu. On this machine, run
@@ -607,6 +607,8 @@ Rules:
 - Kimi defaults to the native alias `kimi-code/k3`. Treat an explicit "K3" / "Kimi K3" request as
   that exact alias. If the user names a different native Kimi alias, pass it verbatim; with no
   model named, honor `HEADLESS_RELAY_KIMI_MODEL` when set, then fall back to `kimi-code/k3`.
+  For "K3.1" / "K3.1 Pro", use the alias the user's own `/model` picker or config shows; the CLI
+  docs publish none, and a mistyped Kimi id falls back to K2.8 Preview instead of failing.
   This override never changes GLM: retain the independent OpenCode Coding Plan model selection.
 
 ## Custom targets
@@ -736,7 +738,10 @@ second opinions, as the compliance gate above says. Depending on the plan and se
 bill to usage credits instead of the plan's included limits (the `/model` picker then shows
 "Requires usage credits" on the Fable row). An interactive session asks before that; `claude -p`
 never asks and bills it, so check the picker before you run this lane in a loop or a batch. Read the served model from `modelUsage` in
-`--output-format json`. The child still loads your global Claude Code hooks and settings, as any
+`--output-format json`. Fable 5.2 needs Claude Code 2.1.321 or later. A request that Fable's
+safety classifiers flag re-runs on another model (Opus 4.8 for cybersecurity, Opus 5 for
+biology), which security reviews can trigger; when `modelUsage` names that model, report it as
+the model that answered. The child still loads your global Claude Code hooks and settings, as any
 `claude -p` call does.
 
 ```bash
@@ -1247,7 +1252,7 @@ directory; agy 1.3.x writes into its own conversation folder, and `agy_image` co
 #   2. Redirect stdin from /dev/null — a positional-arg prompt can otherwise block on
 #      "Reading additional input from stdin". macOS has no `timeout`; use perl's alarm.
 # Pin `gpt-5.6-sol` here: this image recipe was smoke-tested on that id.
-# `gpt-6-sol`, `gpt-6-luna` and `gpt-6-astra` are newer text/agent models,
+# `gpt-6.2-sol`, `gpt-6.2-astra` and the 6.1/6 ids are newer text/agent models,
 # not proof that this image_gen recipe works on them. Test that separately.
 cd /path/to/output-dir
 perl -e 'alarm shift; exec @ARGV' 480 \
