@@ -2,10 +2,18 @@
 
 ## [Unreleased]
 
+## [3.3.0] - 2026-11-20
+
+This minor release includes the accumulated changes since v3.2.0.
+
 ### Added
 
 - Fable 5.2 lane: the new `fable_relay PROMPT-FILE` helper sends every Claude Fable 5.2 handoff as `claude-fable-5-2` at `max` effort (Fable 5.2 defaults to `medium`) and makes sure the prompt starts with the `ultrathink` keyword. It also sets `CLAUDE_CODE_EFFORT_LEVEL` for the child, because that variable outranks `--effort`. Prompts for this lane are always built with RePrompter first (`references/reprompter-relay.md`). Live-verified on Claude Code 2.1.322: a print-mode prompt containing `ultrathink` gets an `ultrathink_effort` attachment in its transcript, and the same prompt without it does not. `scripts/test-fable-target.py` covers the helper offline. The lane section warns that on plans where Fable bills to usage credits, `claude -p` bills without the consent prompt an interactive session shows.
 - `references/role-routing.md`: a generic, configurable template for routing roles (coding, judgment, exploration, review, swarm) to lanes, with a primary/fallback/third table, example invocations for the Codex, Claude, GLM (as a custom target) and Gemini lanes, the rule that reviewers and judges must come from a different provider family than the writer, and a general fallback order. Linked from the SKILL.md reference table.
+
+### Changed
+
+- Gemini lane for agy 1.5.x: since agy 1.5.7 a headless `agy -p` run starts in Auto mode, which edits workspace files without asking. A new `AGY_RO` settings value (deny rules for `write_file(*)`, `command(*)`, `execute_url(*)` and `mcp(*)`) is passed by every answer-only Gemini example: `agy_answer` puts it before the caller's arguments and refuses (exit 2) a caller's `--settings` (a second `--settings` replaces the first), `--mode` (plan mode returns a plan, not an answer), `--output-format` (the empty-answer check needs text) and a bare `--`; option values such as the prompt are skipped by that check. `scripts/regression-agy-readonly.sh` checks this offline with a stub `agy`. The Party Mode Gemini lane, the parallel agy batch and `watch_clip` pass it too. `watch_clip` drops `--mode plan`, which on agy 1.5.13 ended its prompt empty. `agy_image` is unchanged, because its subagent writes the image in a temp folder.
 
 ### Fixed
 
@@ -15,7 +23,7 @@
 
 - Model refresh (2026-11-20). Helper defaults and runnable examples are unchanged; only the model notes and preflight guidance move.
   - Codex: `gpt-6.2-astra` and `gpt-6.2-sol` (released 2026-11-17) are documented as the newest catalog-gated ids. Codex added them in codex-cli 0.169.1. In the 0.171.0 bundled catalog both default to `low` effort, and the Codex context is 500K for 6.2 Sol and 272K for 6.2 Astra. In the API the 6.2 models do not accept `none` effort. GPT-6.1 Sol/Terra are listed too. Live-verified 2026-11-20 on codex-cli 0.171.0 (Linux, ChatGPT login): `codex debug models` lists both ids (6.2 Sol 500K, 6.2 Astra 272K, both `low`), and `codex exec` answered on each at `high` and `xhigh` effort.
-  - Antigravity: Gemini 4 Carbon (Ultra/Enterprise), Hydrogen and Neon (paid Pro/Ultra, `low|medium|high|xhigh`). Neon and Hydrogen answered one-shot print probes on agy 1.2.7; agy's JSON has no served-model field. The media recipes keep the tested Gemini 3.8 Flash pin.
+  - Antigravity: Gemini 4 Carbon (Ultra/Enterprise), Hydrogen and Neon (paid Pro/Ultra, `low|medium|high|xhigh`). Neon and Hydrogen answered one-shot print probes on agy 1.5.13 (an earlier draft of this entry said 1.2.7, which was wrong); agy's JSON has no served-model field. The media recipes keep the tested Gemini 3.8 Flash pin.
   - Claude: minimum Claude Code versions for Sonnet 5.5 (2.1.284), Haiku 5.5 (2.1.293) and Fable 5.2 (2.1.321), and the safety-classifier fallback that can serve a flagged request on Opus 4.8, Opus 5 or Sonnet 5. The Fable lane says to report the model `modelUsage` names.
   - Kimi: K3.1 Pro (2026-10-23) and the remapped `kimi-for-coding` aliases are documented. The default stays `kimi-code/k3`, because the CLI docs publish no K3.1 alias and a mistyped id falls back to K2.8 Preview without thinking.
   - GLM: GLM-5.3 is still the newest Coding Plan flagship; `glm-5.2`/`glm-5.1` requests are routed to 5.3.
@@ -42,6 +50,7 @@
 
 ### Verification
 
+- agy 1.5.13 (Linux x64, 2026-11-20, one account): `agy models` (Neon, Hydrogen, Argon, two Orchestrator ids, 3.8 Flash, Claude Opus/Sonnet 5.5, GPT-OSS; no Carbon). Print runs answered with Neon and Hydrogen ids, a display string, `--effort xhigh` and the Neon Orchestrator; `--effort max` on Neon, `xhigh` on Argon, a display string with `--effort`, and a Carbon id were rejected before the run. Permissions in a temp workspace: a plain run and Default mode created and edited files; `toolPermission: strict` also blocked reads; `AGY_RO` blocked a new file, an edit, an outside write, a shell command and a URL fetch while a read answered; `--mode plan` returned a plan instead of an answer; a second `--settings` replaced the first. `agy_answer` from SKILL.md in bash: a read answered, an edit was refused with the file unchanged, and `--settings`, `--mode plan`, `--output-format json` and `--` exited 2 (zsh not available on that host). A GPT-6.2 Sol review of the diff found the flag-order, plan-mode and wording problems fixed above. `watch_clip` on a generated 4 s clip: with `AGY_RO` it read the on-screen text and colour; with `--mode plan --sandbox` it ended empty. `agy_image`: a JPEG copied out in 49 s. `agy_run 5` on a long prompt: exit 124 after 7.5 s, no agy process left. One agy run started beside three concurrent `codex exec` lanes finished in 3 of 3 rounds.
 - `scripts/test-kimi-runtime.py`: 22 tests pass on macOS 27 (Darwin), including 4 new tests that emulate the macOS answers on any POSIX host. Before the fix, 26 subtests failed on the same machine, and the 4 new tests fail against the old relay. The other regression scripts and the Grok runtime matrix (228 passed, 0 failed) still pass. No real Kimi inference was run.
 - Live agy 1.3.4 runs on 2026-10-13: tool denial for a command, a file write and a URL read (exit 0, empty `response`, `denied_actions`); JSON and stdin prompts; `--effort` with an id and with a display string; the updated `watch_clip` in bash and zsh, including the empty-answer exit 3. The agy parallel-burst hang was not retested.
 - `agy_image` on agy 1.3.4 (2026-10-14): live in bash and zsh, 1024×1024 JPEGs copied out; the path checks in an earlier script form ran against a stubbed `agy` in bash and `zsh -f` (empty answer, outside path, `..`, symlink, missing `conversation_id` → exit 3, nothing copied).
@@ -84,4 +93,5 @@ This minor release includes the accumulated changes since v3.1.1.
 
 Thanks to [@AytuncYildizli](https://github.com/AytuncYildizli) for the native Kimi lane, Claude model-selection contribution and Party / Council Mode. Their original contribution commits and authorship are retained in the repository history.
 
+[3.3.0]: https://github.com/dorukardahan/headless-relay/compare/v3.2.0...v3.3.0
 [3.2.0]: https://github.com/dorukardahan/headless-relay/compare/v3.1.1...v3.2.0

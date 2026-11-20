@@ -2,7 +2,7 @@
 name: headless-relay
 description: Headless handoff guide for running other AI models from inside an agent session (any Agent Skills runtime - Claude Code, Codex, Grok Build, Cursor, OpenClaw, Hermes). Covers GPT (codex exec), GLM (opencode run or zcode --prompt), Kimi K3 (native kimi -p), Grok (grok -p), Gemini (Antigravity agy -p), and Claude (claude -p or a subagent) - inline vs file prompts, parallel multi-model consensus, Party/Council Mode across every safely available built-in and custom lane, JSON output, session resume, image/video generation, video understanding (watching a clip), provider-terms compliance. Use for "ask codex", "ask GLM", "ask Kimi", "ask grok", "ask gemini", "ask Claude", "ask Fable", "second opinion", "cross-model review", "consensus", "party mode", "council mode", "ask everyone", "run all available models", "her şeyi dene", "hepsine sor", "compare models", "generate an image", "watch this video", "run headless", "ask another model".
 license: MIT. Complete terms in LICENSE.txt
-metadata: {"version": "3.2.0"}
+metadata: {"version": "3.3.0"}
 ---
 
 # headless-relay
@@ -580,7 +580,7 @@ substitute a different model to fill the gap.
 | GLM via OpenCode | `command -v opencode` AND `opencode --version` prints a version (an old CLI binary can be killed silently by macOS; the desktop app does not update it — see [references/cli-reference.md](references/cli-reference.md)) | `opencode auth list` shows a Z.AI credential |
 | GLM via ZCode | `command -v zcode` (add a PATH wrapper if only the app is installed) | `~/.zcode/cli/config.json` exists or `ZCODE_API_KEY` is set. `zcode login` is currently broken, and app 3.14.5 needs a small symlink shim before any call works (error `无法定位 CLI ZCode Built-in Provider Config`, "cannot locate the built-in provider config") — see [references/cli-reference.md](references/cli-reference.md) |
 | Grok | `command -v grok` | Run `grok models` (catalog fetch, no model turn). A model list proves the CLI authenticated, even with a stale "not authenticated" header, but it does **not** prove `grok-4.7` access: require an exact `grok-4.7` entry under `Available models:` before setting `GROK_RELAY_MODEL=grok-4.7` for either helper. Otherwise retain the 4.6 default only if the list has `grok-4.6`, or set `GROK_RELAY_MODEL=grok-4.5` if only 4.5 is listed. If none is listed, skip the Grok lane; never guess a pin. With no model list, follow [the auth ladder](references/cli-reference.md). |
-| Gemini via Antigravity | `command -v agy`; `agy --version` (print-mode behavior changed in 1.3.x) | `agy models` lists the model menu when logged in. The menu differs per plan (Gemini 4 Carbon is Ultra/Enterprise only; Gemini 4 Neon and Hydrogen need a paid Pro or Ultra plan), so check it on the account you use; the default model comes from the user's Antigravity config |
+| Gemini via Antigravity | `command -v agy`; `agy --version` (print-mode behavior changed in 1.3.x, and in 1.5.7 headless runs began to start in Auto mode, which edits files; agy updates itself, so record the version with results) | `agy models` lists the model menu when logged in. The menu differs per plan (Gemini 4 Carbon is Ultra/Enterprise only; Gemini 4 Neon and Hydrogen need a paid Pro or Ultra plan), so check it on the account you use; the default model comes from the user's Antigravity config |
 | Claude | `command -v claude`; `claude --version` | `claude-opus-5-5` requires Claude Code 2.1.280+ (2.1.260 returns HTTP 400), `claude-sonnet-5-5` 2.1.284+, `claude-haiku-5-5` 2.1.293+ and `claude-fable-5-2` 2.1.321+. Confirm signed-in status on the intended profile and the actual `modelUsage` id after a bounded run. Keep the compliance gate below. |
 
 Rules:
@@ -766,10 +766,20 @@ $p" ;;
 )
 ```
 
-Define `agy_run` and `agy_answer` once before any Gemini example. `agy_run` bounds an agy run for
-real; `agy_answer` also turns an empty answer into a failure. The Gemini commands below and the
-`agy_image` and `watch_clip` recipes use them. They need `python3` 3.9 or newer (the macOS system
-Python works).
+Define `AGY_RO`, `agy_run` and `agy_answer` once before any Gemini example. `agy_run` bounds an
+agy run for real; `agy_answer` adds the `AGY_RO` read-only rules and turns an empty answer into a
+failure. The Gemini commands below use `agy_answer`, or `agy_run` with `--settings "$AGY_RO"`;
+`watch_clip` passes `AGY_RO` to `agy_run`, and `agy_image` calls `agy_run` without it, because its
+image subagent has to write the image. They need `python3` 3.9 or newer (the macOS system Python
+works).
+
+Since agy 1.5.7 a headless `-p` run starts in **Auto** mode, which edits files in the workspace
+without asking. On agy 1.5.13 a plain `agy -p` asked to edit a file did edit it, and so did a run
+with Default mode (`--settings '{"agentMode":""}'`). Any answer-only Gemini call therefore passes
+`--settings "$AGY_RO"`: its deny rules blocked file writes (inside and outside the workspace),
+shell commands, URL fetches and MCP tools, while file reads still worked. `--mode plan` is not a
+read-only switch on 1.5.13: a plain question got a plan back instead of an answer, and the
+`watch_clip` prompt ended empty because a shell call was denied.
 
 ```bash
 # agy_run SECS AGY-ARGS...: run agy with a real deadline (exit 124 on timeout, 130 on INT/TERM/HUP).
@@ -862,11 +872,29 @@ rc = int(data) if data.strip().lstrip(b"-").isdigit() else 1
 finish(rc if rc >= 0 else 128 - rc)
 ' "$t" agy "$@"
 )
-# agy_answer SECS AGY-ARGS...: agy_run that prints the answer only when there is one. agy 1.3.x
-# exits 0 with no output when it denied a tool, so an empty answer fails with exit 3; any other
-# failure keeps agy_run's status (124 = deadline) and its partial output is not printed.
+# AGY_RO: agy settings for answer-only runs. agy 1.5.7+ starts headless runs in Auto mode, which
+# edits workspace files without asking; these deny rules block file writes, shell commands, URL
+# fetches and MCP tools, and leave file reads working (verified on agy 1.5.13).
+AGY_RO='{"permissions":{"deny":["write_file(*)","command(*)","execute_url(*)","mcp(*)"]}}'
+# agy_answer SECS AGY-ARGS...: agy_run with the AGY_RO rules that prints a plain-text answer only
+# when there is one. It refuses (exit 2) a caller's --settings (a second --settings replaces the
+# first instead of merging), --mode (plan mode returns a plan, not an answer), --output-format
+# (the empty-answer check needs text) and a bare --. Option values such as the prompt are skipped
+# by this check (agy itself refuses a -p value that starts with --). agy exits 0 with no output when it
+# auto-denied a tool that needed a prompt, so an empty answer fails with exit 3; any other failure
+# keeps agy_run's status (124 = deadline) and its partial output is not printed.
 agy_answer() (
-  a=$(agy_run "$@") || exit
+  t=$1; shift
+  skip=
+  for arg in "$@"; do
+    if [ -n "$skip" ]; then skip=; continue; fi
+    case $arg in
+      -p|--print|--prompt|--model|--effort|--add-dir|--print-timeout|--project|--agent|--conversation|--log-file) skip=1 ;;
+      --settings|--settings=*|--mode|--mode=*|--output-format|--output-format=*|--)
+        echo "agy_answer: $arg is not allowed here (it would undo AGY_RO or the text check); use agy_run" >&2; exit 2 ;;
+    esac
+  done
+  a=$(agy_run "$t" --settings "$AGY_RO" "$@") || exit
   [ -n "$a" ] || { echo "agy_answer: empty answer (agy probably denied a tool)" >&2; exit 3; }
   printf '%s\n' "$a"
 )
@@ -1007,7 +1035,7 @@ printf '%s\n' "$kimi_status" > /tmp/ans-kimi.status
 wait
 # Gemini runs SEQUENTIALLY, AFTER the burst — agy 1.1.0 wedges inside a 3+ CLI burst (see below):
 # agy 1.3.x exits 0 with EMPTY output when it denied a tool, so an empty answer is a failure (3):
-if agy_run 300 -p "$(cat /tmp/handoff.md)" --model "Gemini 3.8 Flash (High)" > /tmp/ans-gemini.md 2>/tmp/ans-gemini.err; then gemini_status=0; else gemini_status=$?; fi
+if agy_run 300 -p "$(cat /tmp/handoff.md)" --model "Gemini 3.8 Flash (High)" --settings "$AGY_RO" > /tmp/ans-gemini.md 2>/tmp/ans-gemini.err; then gemini_status=0; else gemini_status=$?; fi
 if [ "$gemini_status" -eq 0 ] && [ ! -s /tmp/ans-gemini.md ]; then gemini_status=3; fi
 printf '%s\n' "$gemini_status" > /tmp/ans-gemini.status
 ```
@@ -1074,7 +1102,7 @@ claim() { # $1 = NN. 0 = this lane owns it. mkdir is the atomic claim.
 }
 run_one() { # $1 = items/NN, $2 = NN. Publish out/NN.md only after a non-empty answer.
   try() {
-    text=$(agy_run 900 -p "$(cat prompt.md)" --model gemini-4-argon-high --add-dir "$1" </dev/null) || return $?
+    text=$(agy_run 900 -p "$(cat prompt.md)" --model gemini-4-argon-high --add-dir "$1" --settings "$AGY_RO" </dev/null) || return $?
     [ -n "$text" ] || return 3   # empty answer: existing agy 1.3.x failure
     printf '%s\n' "$text"
   }
@@ -1384,7 +1412,8 @@ watch_clip() (   # subshell: its own EXIT trap, so each clip's workspace is remo
     -c:v libx264 -crf 30 -c:a aac -b:a 96k "$W/clip.mp4" || exit 1
   P=$(cat "$2") || exit 1   # read the prompt before cd; keep it out of the workspace
   # agy can hang: agy_run (define it once, above) stops it after 300 s with exit 124
-  out=$(cd "$W" && agy_run 300 -p "$P" --model "Gemini 3.8 Flash (High)" --add-dir "$W" --mode plan --sandbox </dev/null)
+  # AGY_RO keeps it answer-only; on agy 1.5.13 `--mode plan` ended this prompt empty
+  out=$(cd "$W" && agy_run 300 -p "$P" --model "Gemini 3.8 Flash (High)" --add-dir "$W" --sandbox --settings "$AGY_RO" </dev/null)
   rc=$?; [ "$rc" -eq 0 ] || exit "$rc"
   # agy 1.3.4 exits 0 with EMPTY output when it auto-denied a tool ("jetski: no output produced")
   [ -n "$out" ] || { echo "watch_clip: empty answer; agy probably denied a tool" >&2; exit 3; }
@@ -1494,8 +1523,9 @@ while a same-provider second opinion should stay in-session as a subagent.
 | Kimi: `Invalid value for --output-format: Output format is only supported for print UI` | The archived Python `kimi-cli` (`kimi --version` prints `kimi, version 1.x`) is first on PATH. Install the Kimi Code CLI (`@moonshot-ai/kimi-code`) and make its `kimi` resolve first; do not rewrite the relay for the old CLI |
 | `kimi-relay: refusing: [Errno 3] No such process` after every macOS run | A relay older than this fix treated macOS's answers for the exited-but-unreaped leader (ESRCH from `getpgid`, EPERM from `killpg`) as ownership loss. Update the skill; the fixed helper verifies the leader with `waitid(WNOWAIT)` instead |
 | agy reads/writes files in `~/.gemini/antigravity-cli/scratch` instead of your repo | Antigravity's default working dir is its own scratch workspace — pass `--add-dir /path/to/repo` (it becomes the working directory) |
-| agy: `flag needs an argument: -print` | `-p` needs its value: use `agy -p "$(cat /tmp/handoff.md)"`, or on agy 1.3.x omit `-p` and pipe the file on stdin |
-| agy exits 0 with empty output; stderr `jetski: no output produced — a tool required the "…" permission` | agy 1.3.x print mode auto-denies tools (shell, file write, URL read, MCP). Tell the model to answer in text without tools, or allow that tool in agy's settings.json; treat empty output as a failed relay |
+| agy: `flag needs an argument: -print` | `-p` needs its value: use `agy_answer 300 -p "$(cat /tmp/handoff.md)"` (bare `agy -p` on 1.5.x can edit files), or on agy 1.3.x+ omit `-p` and pipe the file on stdin with `--settings "$AGY_RO"` |
+| agy exits 0 with empty output; stderr `jetski: no output produced — a tool required the "…" permission` | agy print mode auto-denies a tool that needs a prompt (1.3.x: shell, file write, URL read, MCP; 1.5.13: shell). Tell the model to answer in text without tools, or allow that tool in agy's settings.json; treat empty output as a failed relay |
+| agy edited files during a review or Q&A run | agy 1.5.7+ starts headless runs in Auto mode, which edits workspace files without asking. Use `agy_answer`, or pass `--settings "$AGY_RO"` to `agy_run`. A second `--settings` replaces the first, so do not add your own after it |
 | agy image prompt ("call your generate_image tool") exits 0 with no image | agy 1.3.x: the root agent makes a shell call instead, and print mode denies it. Use `agy_image` (Scenario H), which asks for the built-in image-generator subagent and copies the file out of agy's conversation folder |
 | agy run ends empty with a denied "mcp" action you never asked for | agy loads `~/.gemini/GEMINI.md` and its MCP servers in print mode; a rule that says "call this MCP tool first" (e.g. a memory server) gets auto-denied and ends the run. Add "do not call MCP or memory tools" to the prompt |
 | agy `-p` never returns when launched inside a parallel multi-CLI burst | Known agy 1.1.0 timing bug (solo/pairwise runs are reliable) — run the Gemini lane sequentially around the burst, and always cap it with a timeout. agy-only lanes for independent jobs are a separate observed case (Scenario C, "Batch jobs: parallel agy lanes"), not a retest of this bug |

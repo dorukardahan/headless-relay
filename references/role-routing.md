@@ -19,7 +19,7 @@ model id touches one place.
 | `codex` | OpenAI | `codex exec -s read-only --skip-git-repo-check -m <codex-model> </dev/null` |
 | `claude` | Anthropic | `claude -p --model <claude-model> --permission-mode plan --output-format json </dev/null` |
 | `glm` | Zhipu | a Claude-Code-style custom lane registered as `glm-custom`, see below |
-| `gemini` | Google | `agy -p "<prompt>" --model <agy-model> </dev/null`, always solo |
+| `gemini` | Google | `agy_answer 300 -p "<prompt>" --model <agy-model> </dev/null` (adds the `AGY_RO` read-only rules; bare `agy -p` on agy 1.5.x can edit files), always solo |
 
 Notes per lane:
 

@@ -14,7 +14,8 @@ unverifiable shipped binary, then re-verified 2026-08-14 on grok 1.0.3 (grok-4.6
 (which lanes can actually watch a local clip). 2026-11-20 model refresh: GPT-6.2 Astra / Sol
 (listed by `codex debug models` on codex-cli 0.171.0; `codex exec` answered on both at `high`
 and `xhigh`), Gemini 4 Carbon / Hydrogen /
-Neon (Neon and Hydrogen answered a print-mode probe on agy 1.2.7), Claude Sonnet 5.5 / Haiku 5.5
+Neon (Neon and Hydrogen answered print-mode probes on agy 1.5.13, where headless runs now start in
+Auto mode), Claude Sonnet 5.5 / Haiku 5.5
 CLI version gates, and Kimi K3.1 Pro. Flags drift — re-check `--help` when a command errors with
 `unexpected argument`.
 
@@ -814,7 +815,37 @@ The Antigravity CLI, `agy`, is the default Gemini lane (install:
 `curl -fsSL https://antigravity.google/cli/install.sh | bash`). Auth comes from the Antigravity
 app/CLI Google login. First verified 2026-07-08 on agy 1.1.0; re-verified 2026-10-13 on agy 1.3.4,
 where print mode changed in three ways: it now auto-denies tools, it has JSON output, and it reads
-the prompt from stdin.
+the prompt from stdin. Re-verified 2026-11-20 on agy 1.5.13 (Linux x64, the latest release that
+day), where the permission default changed again: see "agy 1.5.x" below.
+
+agy updates itself. A run's log (`~/.gemini/antigravity-cli/cli.log`) shows the auto-updater
+spawning a background update, and the binary on this host had been replaced that same day. `agy
+--version` at the start of a session is therefore not a pin; record it with any result you rely on.
+
+**agy 1.5.x: headless runs start in Auto mode.** Since 1.5.7 a session with no saved mode,
+including `agy -p`, starts in Auto mode, which approves file edits and "safe" commands without
+asking. Live on agy 1.5.13, one account, in a fresh temp workspace:
+
+- A plain `agy -p` asked to create a file or replace a word in an existing file did so (exit 0).
+  Default mode (`--settings '{"agentMode":""}'`, what `/config` saves) also created the file.
+- A shell command (`uname -a`) and a URL fetch were still auto-denied: exit 0, empty `response`,
+  `denied_actions: [{"action":"command"}]`.
+- `--settings '{"toolPermission":"strict"}'` denied the write, but it also denied reading a file
+  in the workspace, and `permissions.allow` entries `read_file(*)` / `read_file(**)` did not let
+  the read through.
+- `--settings "$AGY_RO"`, the deny rules `write_file(*)`, `command(*)`, `execute_url(*)` and
+  `mcp(*)`, blocked a new file, an edit, a write to an absolute path outside the workspace, a
+  shell command and a URL fetch, while a file read still answered. With deny rules the model
+  explains the refusal in its answer instead of ending empty, and JSON has no `denied_actions`.
+- `--mode plan` does not make a run answer-only: a plain question about a workspace file returned
+  "created [implementation plan]" instead of the answer, and the `watch_clip` prompt ended empty.
+- A second `--settings` flag replaces the first (a later `{"agentMode":"auto"}` dropped the deny
+  rules and the edit went through). `--mode default` is not a value: agy warns `unrecognized
+  --mode value "default" (valid: accept-edits, auto, plan)` and runs anyway, in Auto.
+
+The answer-only examples in SKILL.md pass `AGY_RO` (`agy_answer` adds it and refuses a caller's
+own `--settings`). `agy_image` runs in its own temp folder without it, because its image-generator
+subagent writes the image.
 
 The standalone Gemini CLI (`gemini`, `google-gemini/gemini-cli`) is still released, but it is not
 a drop-in lane for personal Google accounts. Its source (0.62.0, `code_assist/setup.ts`) puts a
@@ -842,7 +873,8 @@ instead, so the Google sign-in went through before the tier check failed.
 | `--model <name>` | A model id or display string from `agy models`, e.g. `gemini-3.8-flash-high` or `"Gemini 3.8 Flash (High)"`. Omit to use the user's configured default. |
 | `--effort <level>` | `low\|medium\|high\|xhigh\|max`. Works only with a base model id: `--model gemini-3.8-flash --effort high`. With a display string such as `"Gemini 3.8 Flash (High)"` it fails with `--effort is not supported for model`, and `"Gemini 3.8 Flash"` without a tier suffix is not a valid model. The levels depend on the model: Gemini 4 Argon takes only `low`, `medium` and `high`. |
 | `--add-dir <path>` | Add a directory to the workspace (repeatable) — it also BECOMES the working directory. Without it agy works in its own scratch dir, `~/.gemini/antigravity-cli/scratch`. |
-| `--mode <mode>` | `accept-edits`, `plan`. Use `plan` for advice-only runs. |
+| `--mode <mode>` | `accept-edits`, `auto`, `plan` (1.5.13). Headless runs default to `auto` since 1.5.7. An unknown value only warns and runs in Auto. `plan` is not an answer-only mode on 1.5.13; use `--settings "$AGY_RO"`. |
+| `--settings <json\|file>` | Settings for this run only, never saved: settings.json keys, inline or as a file. Unknown keys and values fail before the run. A second `--settings` replaces the first. |
 | `--sandbox` | Enable terminal restrictions. |
 | `--dangerously-skip-permissions` | Auto-approve tool permission prompts. |
 | `-c, --continue` / `--conversation <id>` | Resume the most recent conversation / a specific one. |
@@ -872,21 +904,31 @@ November 2026 brought three more Gemini 4 models to Antigravity:
 | Gemini 4 Hydrogen (`gemini-4-hydrogen`) | 2026-11-12 | paid Google AI Pro and Ultra | low, medium, high (default), xhigh | Fast everyday model, the Flash successor |
 | Gemini 4 Neon (`gemini-4-neon`) | 2026-11-18 | paid Google AI Pro and Ultra | low, medium, high (default), xhigh | Between Hydrogen and Carbon; replaces Argon in the Gemini app |
 
-On 2026-11-20 `agy models` on agy 1.2.7 (one account) listed `gemini-4-neon-low|medium|high|xhigh`,
-`gemini-4-hydrogen-low|medium|high|xhigh`, `gemini-4-argon-low|medium|high`, `gemini-3.8-flash-*`,
-`claude-opus-5-5-*`, `claude-sonnet-5-5-*` and `gpt-oss-120b-medium`, but no Carbon. On a Pro account,
-Carbon is reported greyed out in the interactive `/model` picker and absent from `agy models`,
-which lists only selectable models. One-shot print probes answered with `--model gemini-4-neon-high`,
-`--model gemini-4-hydrogen-high` and `--model gemini-4-neon --effort xhigh`. agy's JSON result
-has no served-model field (`usage` holds only token counts), so the requested id is all a run
-can report. Antigravity's Orchestrator (Carbon or Neon planning, Hydrogen executing) is a model
-picker option, not a lane this skill drives. The recipes below keep `"Gemini 3.8 Flash (High)"`
-because the image and video-watching checks were run on it; Hydrogen and Neon were not
-re-tested on those recipes.
+On 2026-11-20 `agy models` on agy 1.5.13 (one account) listed `gemini-4-neon-low|medium|high|xhigh`,
+`gemini-4-hydrogen-low|medium|high|xhigh`, `gemini-4-argon-low|medium|high`,
+`gemini-pro-orchestrator-neon` ("Orchestrator (Neon)"), `gemini-pro-orchestrator-g1-pro`
+("Orchestrator (Argon)"), `gemini-3.8-flash-*`, `claude-opus-5-5-low|medium|high`,
+`claude-sonnet-5-5-low|medium|high` and `gpt-oss-120b-medium`, but no Carbon:
+`--model gemini-4-carbon-high` failed before the run with `is not recognized as a known model or
+custom model in settings` and the list of available models. On a Pro account, Carbon is reported
+greyed out in the interactive `/model` picker and absent from `agy models`, which lists only
+selectable models.
+
+Print probes on 1.5.13 that answered: `--model gemini-4-neon-high`, `--model "Gemini 4 Neon
+(High)"`, `--model gemini-4-hydrogen-high`, `--model gemini-4-hydrogen --effort xhigh` and
+`--model gemini-pro-orchestrator-neon`. Rejected before the run (exit 1, JSON `status: "ERROR"`,
+`finished_reason: "error"`): `--model gemini-4-neon --effort max` (`has no "max" effort
+(available: low, medium, high, xhigh)`), `--model gemini-4-argon --effort xhigh`, and a display
+string with `--effort` (`--effort is not supported for model "Gemini 4 Neon (High)"`). agy's JSON
+result has no served-model field (`usage` holds only token counts), so the requested id is all a
+run can report. The recipes below keep `"Gemini 3.8 Flash (High)"` because the image and
+video-watching checks were run on it (both re-run on 1.5.13); Hydrogen and Neon were not tested on
+those recipes.
 
 Notes, all live-verified:
-- **Print mode auto-denies tools on 1.3.4.** A shell command, a file write and a URL read were
-  each refused because "headless mode cannot prompt". The run still **exits 0** with
+- **Print mode auto-denies tools on 1.3.4** (on 1.5.13 only tools that still need a prompt, such
+  as shell commands; file edits go through in Auto mode, see "agy 1.5.x" above). A shell command,
+  a file write and a URL read were each refused because "headless mode cannot prompt". The run still **exits 0** with
   `status: "SUCCESS"` and an **empty** `response`. stderr says `jetski: no output produced — a
   tool required the "command" permission…`, and JSON lists `denied_actions`. Treat an empty answer
   or any `denied_actions` entry as a failed relay. For text relays, say in the prompt that the
@@ -902,7 +944,11 @@ Notes, all live-verified:
   pairwise runs pass 100%, and a 5s stagger does not help. Timing/load-sensitive bug in agy
   1.1.0, not retested on 1.3.4 — run the Gemini lane sequentially (before or after the burst),
   cap it with a timeout, and retest on future agy releases. Reported upstream with the full repro
-  matrix: github.com/google-antigravity/antigravity-cli/issues/573.
+  matrix: github.com/google-antigravity/antigravity-cli/issues/573. Partial retest on 2026-11-20
+  (agy 1.5.13, Linux): an `agy -p` started 2 s after three concurrent `codex exec` lanes
+  finished in 3 of 3 rounds (42–44 s, with all three Codex lanes still running when it returned).
+  That covers Codex only, not the opencode and grok mix of the original repro, so the sequential
+  advice stays.
 - **agy-only parallel lanes are a separate case, and not a retest of that hang.** On 2026-11-01,
   agy 1.3.x on one account ran 4 to 6 parallel agy processes with no other model CLI in the
   burst (65 short vertical clips, one clip per call, model `gemini-4-argon-high`): 65 of 65
@@ -1251,7 +1297,8 @@ watch_clip() (   # subshell: its own EXIT trap, so each clip's workspace is remo
     -c:v libx264 -crf 30 -c:a aac -b:a 96k "$W/clip.mp4" || exit 1
   P=$(cat "$2") || exit 1   # read the prompt before cd; keep it out of the workspace
   # agy can hang: agy_run (define it once, above) stops it after 300 s with exit 124
-  out=$(cd "$W" && agy_run 300 -p "$P" --model "Gemini 3.8 Flash (High)" --add-dir "$W" --mode plan --sandbox </dev/null)
+  # AGY_RO keeps it answer-only; on agy 1.5.13 `--mode plan` ended this prompt empty
+  out=$(cd "$W" && agy_run 300 -p "$P" --model "Gemini 3.8 Flash (High)" --add-dir "$W" --sandbox --settings "$AGY_RO" </dev/null)
   rc=$?; [ "$rc" -eq 0 ] || exit "$rc"
   # agy 1.3.4 exits 0 with EMPTY output when it auto-denied a tool ("jetski: no output produced")
   [ -n "$out" ] || { echo "watch_clip: empty answer; agy probably denied a tool" >&2; exit 3; }
@@ -1261,10 +1308,12 @@ watch_clip input.mp4 watch-prompt.md
 # many clips, one after another: while IFS= read -r f <&3; do watch_clip "$f" watch-prompt.md; done 3< clips.txt
 ```
 
-`--mode plan --sandbox` keeps this analysis-only: on agy 1.1.0 print mode ran shell, file and
-network tools unprompted (see the notes above), and a clip or prompt can carry misleading
-instructions. Verified 2026-10-09: with both flags the clip was still watched and transcribed,
-while a request to create a file in the workspace was refused. Tell it to only read `clip.mp4`, not to search or create files, to mark unclear words as
+`--sandbox --settings "$AGY_RO"` keeps this analysis-only (`AGY_RO` is defined with `agy_run` in
+SKILL.md): agy 1.5.7+ starts headless runs in Auto mode, which edits workspace files, and a clip
+or prompt can carry misleading instructions. Verified 2026-11-20 on agy 1.5.13 with a generated
+4-second clip: with `AGY_RO` the model read the on-screen text and the background colour; with
+the older `--mode plan --sandbox` the same prompt exited 0 with an empty answer after a denied
+shell call. (On 2026-10-09, agy 1.3.4, `--mode plan --sandbox` still worked.) Tell it to only read `clip.mp4`, not to search or create files, to mark unclear words as
 `[unclear]`, and to say so if it cannot hear audio. For many clips, call `watch_clip` in a loop
 fed on a separate descriptor (as shown), so ffmpeg and agy cannot consume the list. That loop
 is sequential. Parallel agy-only lanes for independent clips are a separate observation
@@ -1526,10 +1575,10 @@ structured output for the precise reason. When capturing a piped tool's exit thr
 | GLM confuses similar functions across files | Known limitation | Cross-check its findings against actual file paths |
 | A model returns empty JSON `.text`/`.result`/`.response` | Field name differs by version | Inspect the raw JSON once; adjust the `jq` path |
 | agy file operations land in `~/.gemini/antigravity-cli/scratch` | Antigravity's default working dir is its own scratch workspace, not your cwd | Pass `--add-dir /path/to/repo` (it becomes the working directory); use absolute paths in prompts |
-| agy: `flag needs an argument: -print` | `-p` was given no value | Use `agy -p "$(cat file)"` (quoted command substitution passes the bytes verbatim), or on agy 1.3.x omit `-p` and pipe the file on stdin |
+| agy: `flag needs an argument: -print` | `-p` was given no value | Use `agy_answer 300 -p "$(cat file)"` (quoted command substitution passes the bytes verbatim; bare `agy -p` on 1.5.x can edit files), or on agy 1.3.x+ omit `-p` and pipe the file on stdin with `--settings "$AGY_RO"` |
 | agy exits 0 with empty output; stderr `jetski: no output produced — a tool required the "…" permission` | agy 1.3.x print mode auto-denies tools; JSON output lists `denied_actions` | Tell the model to answer in text without tools, or add a `permissions.allow` rule; treat empty output as a failed relay |
 | agy: `--effort is not supported for model "Gemini 3.8 Flash (High)"` | `--effort` only works with a base model id | Use `--model gemini-3.8-flash --effort high`, or keep the display string without `--effort` |
-| agy modifies files you only wanted reviewed | agy 1.1.x print mode ran tools unprompted (yolo-like); 1.3.x auto-denies them unless `permissions.allow` or `--dangerously-skip-permissions` allows them | Add `--mode plan` (advice-only) or `--sandbox`, and do not pass `--dangerously-skip-permissions` for reviews |
+| agy modifies files you only wanted reviewed | agy 1.5.7+ starts headless runs in Auto mode, which edits workspace files without asking (1.1.x also ran tools unprompted; 1.3.x auto-denied them) | Pass `--settings "$AGY_RO"` (or use `agy_answer`, which adds it), and do not pass `--dangerously-skip-permissions` for reviews. `--mode plan` is not a substitute on 1.5.13 |
 | agy: `jetski: no output produced — a tool required the "mcp" permission …` | The prompt made agy reach for a tool that headless mode auto-denies (e.g. listing a directory), or a global rule in `~/.gemini/GEMINI.md` told the model to call an MCP tool first (seen 2026-10-14 with a memory server) | Keep the prompt to the task (e.g. watch only `clip.mp4`), add "do not call MCP or memory tools", and rerun; do not reach for `--dangerously-skip-permissions` |
 | agy image prompt ("call your generate_image tool") exits 0 with no image | agy 1.3.x: the root agent called no `generate_image` tool, made a shell call instead, and print mode denied it | Use `agy_image` (built-in image-generator subagent; the file is copied out of `~/.gemini/antigravity-cli/brain/<conversation_id>/` after a path check) |
 | agy `-p` hangs forever inside a parallel multi-CLI burst | agy 1.1.0 timing/load bug when 3+ other model CLIs run concurrently (solo/pairwise reliable; stagger insufficient) | Run the Gemini lane sequentially around the burst; always cap agy with a timeout. agy-only lanes for independent jobs are a separate observed case (SKILL.md, "Batch jobs: parallel agy lanes"), not a retest of this hang |
