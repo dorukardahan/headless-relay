@@ -12,7 +12,7 @@ unverifiable shipped binary, then re-verified 2026-08-14 on grok 1.0.3 (grok-4.6
 2026-07-08 on agy 1.1.0 and refreshed 2026-09-21 on agy 1.1.1 (`agy models` listed Gemini 3.8 Flash as the current top Gemini Flash tier). 2026-10-09 refresh: opencode 1.18.35, zcode CLI 0.16.9 (ZCode app 3.14.5), grok 1.0.50 and agy
 1.1.x re-checked, plus a new [Video understanding](#video-understanding-watching-a-clip) section
 (which lanes can actually watch a local clip). 2026-11-20 model refresh: GPT-6.2 Astra / Sol
-(ids from the codex-cli 0.171.0 bundled catalog, not live-run here), Gemini 4 Carbon / Hydrogen /
+(listed by `codex debug models` on codex-cli 0.171.0; no model turn run), Gemini 4 Carbon / Hydrogen /
 Neon (Neon and Hydrogen answered a print-mode probe on agy 1.2.7), Claude Sonnet 5.5 / Haiku 5.5
 CLI version gates, and Kimi K3.1 Pro. Flags drift — re-check `--help` when a command errors with
 `unexpected argument`.
