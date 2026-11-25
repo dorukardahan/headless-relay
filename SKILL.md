@@ -2,7 +2,7 @@
 name: headless-relay
 description: Headless handoff guide for running other AI models from inside an agent session (any Agent Skills runtime - Claude Code, Codex, Grok Build, Cursor, OpenClaw, Hermes). Covers GPT (codex exec), GLM (opencode run or zcode --prompt), Kimi K3 (native kimi -p), Grok (grok -p), Gemini (Antigravity agy -p), and Claude (claude -p or a subagent) - inline vs file prompts, parallel multi-model consensus, Party/Council Mode across every safely available built-in and custom lane, JSON output, session resume, image/video generation, video understanding (watching a clip), provider-terms compliance. Use for "ask codex", "ask GLM", "ask Kimi", "ask grok", "ask gemini", "ask Claude", "ask Fable", "second opinion", "cross-model review", "consensus", "party mode", "council mode", "ask everyone", "run all available models", "her şeyi dene", "hepsine sor", "compare models", "generate an image", "watch this video", "run headless", "ask another model".
 license: MIT. Complete terms in LICENSE.txt
-metadata: {"version": "3.3.0"}
+metadata: {"version": "3.4.0"}
 ---
 
 # headless-relay
@@ -580,7 +580,7 @@ substitute a different model to fill the gap.
 | GLM via OpenCode | `command -v opencode` AND `opencode --version` prints a version (an old CLI binary can be killed silently by macOS; the desktop app does not update it — see [references/cli-reference.md](references/cli-reference.md)) | `opencode auth list` shows a Z.AI credential |
 | GLM via ZCode | `command -v zcode` (add a PATH wrapper if only the app is installed) | `~/.zcode/cli/config.json` exists or `ZCODE_API_KEY` is set. `zcode login` is currently broken, and app 3.14.5 needs a small symlink shim before any call works (error `无法定位 CLI ZCode Built-in Provider Config`, "cannot locate the built-in provider config") — see [references/cli-reference.md](references/cli-reference.md) |
 | Grok | `command -v grok` | Run `grok models` (catalog fetch, no model turn). A model list proves the CLI authenticated, even with a stale "not authenticated" header, but it does **not** prove `grok-4.7` access: require an exact `grok-4.7` entry under `Available models:` before setting `GROK_RELAY_MODEL=grok-4.7` for either helper. Otherwise retain the 4.6 default only if the list has `grok-4.6`, or set `GROK_RELAY_MODEL=grok-4.5` if only 4.5 is listed. If none is listed, skip the Grok lane; never guess a pin. With no model list, follow [the auth ladder](references/cli-reference.md). |
-| Gemini via Antigravity | `command -v agy`; `agy --version` (print-mode behavior changed in 1.3.x, and in 1.5.7 headless runs began to start in Auto mode, which edits files; agy updates itself, so record the version with results) | `agy models` lists the model menu when logged in. The menu differs per plan (Gemini 4 Carbon is Ultra/Enterprise only; Gemini 4 Neon and Hydrogen need a paid Pro or Ultra plan), so check it on the account you use; the default model comes from the user's Antigravity config |
+| Gemini via Antigravity | `command -v agy`; `agy --version` (print-mode behavior changed in 1.3.x, in 1.5.7 headless runs began to start in Auto mode, which edits files, and in 1.5.16 runs began to load `~/.agents/skills`; agy updates itself, so record the version with results) | `agy models` lists the model menu when logged in. The menu differs per plan and changes often: per 9to5Google (2026-11-23) Gemini 4 Carbon came to paid AI Pro, Hydrogen is promised to all users, and Gemini 4 Argon and Gemini 3.8 Flash leave Antigravity on 2026-11-30. Check it on the account you use; the default model comes from the user's Antigravity config |
 | Claude | `command -v claude`; `claude --version` | `claude-opus-5-5` requires Claude Code 2.1.280+ (2.1.260 returns HTTP 400), `claude-sonnet-5-5` 2.1.284+, `claude-haiku-5-5` 2.1.293+ and `claude-fable-5-2` 2.1.321+. Confirm signed-in status on the intended profile and the actual `modelUsage` id after a bounded run. Keep the compliance gate below. |
 
 Rules:
@@ -779,7 +779,18 @@ with Default mode (`--settings '{"agentMode":""}'`). Any answer-only Gemini call
 `--settings "$AGY_RO"`: its deny rules blocked file writes (inside and outside the workspace),
 shell commands, URL fetches and MCP tools, while file reads still worked. `--mode plan` is not a
 read-only switch on 1.5.13: a plain question got a plan back instead of an answer, and the
-`watch_clip` prompt ended empty because a shell call was denied.
+`watch_clip` prompt ended empty because a shell call was denied. Re-checked 2026-11-25 on agy
+1.5.17: under `AGY_RO` a request to create a file, append to one and run `touch` changed nothing.
+
+Since agy 1.5.16 every run, headless ones included, also loads user-global skills from
+`~/.agents/skills` (the Codex skill home on many machines) next to `~/.gemini/skills`, and
+`~/.gemini/GEMINI.md` was already read. Verified 2026-11-25 on agy 1.5.17: a print-mode run from
+an empty temp workspace listed skills from both folders, with and without
+`--disable-slash-commands` (that flag only stops slash-command and skill expansion inside the
+prompt text). Skill names and descriptions therefore go to Google with every Gemini relay call
+and can steer the answer. agy documents no switch to turn this discovery off, and a temporary
+`HOME` loses the sign-in. On a machine that relays to Gemini, keep private or client-specific
+skills out of `~/.agents/skills`, or accept that their descriptions are part of the context.
 
 ```bash
 # agy_run SECS AGY-ARGS...: run agy with a real deadline (exit 124 on timeout, 130 on INT/TERM/HUP).
@@ -874,7 +885,8 @@ finish(rc if rc >= 0 else 128 - rc)
 )
 # AGY_RO: agy settings for answer-only runs. agy 1.5.7+ starts headless runs in Auto mode, which
 # edits workspace files without asking; these deny rules block file writes, shell commands, URL
-# fetches and MCP tools, and leave file reads working (verified on agy 1.5.13).
+# fetches and MCP tools, and leave file reads working (verified on agy 1.5.13; writes and shell
+# re-checked on 1.5.17).
 AGY_RO='{"permissions":{"deny":["write_file(*)","command(*)","execute_url(*)","mcp(*)"]}}'
 # agy_answer SECS AGY-ARGS...: agy_run with the AGY_RO rules that prints a plain-text answer only
 # when there is one. It refuses (exit 2) a caller's --settings (a second --settings replaces the
@@ -906,7 +918,7 @@ agy_answer() (
 codex exec "your question here"
 
 # GLM via OpenCode
-echo "your question here" | opencode run -m "zai-coding-plan/glm-5.3" --variant max
+echo "your question here" | opencode run -m "zai-coding-plan/glm-5.4" --variant max
 
 # GLM via the ZCode app's bundled CLI (one-time setup: references/cli-reference.md)
 zcode --prompt "your question here"
@@ -926,7 +938,7 @@ grok_relay "your question here"
 
 # Gemini via Antigravity — model id or display string from `agy models`. agy 1.3.x exits 0 with
 #   EMPTY output when it auto-denied a tool; agy_answer turns that into exit 3 (124 = deadline).
-agy_answer 300 -p "your question here" --model "Gemini 3.8 Flash (High)"
+agy_answer 300 -p "your question here" --model "Gemini 4 Hydrogen (High)"
 
 # Claude (headless subprocess)
 claude_relay -p "your question here"
@@ -956,7 +968,7 @@ Per-CLI stdin behavior:
 codex exec < /tmp/handoff.md
 
 # OpenCode: no stdin-redirect; pipe it
-cat /tmp/handoff.md | opencode run -m "zai-coding-plan/glm-5.3" --variant max
+cat /tmp/handoff.md | opencode run -m "zai-coding-plan/glm-5.4" --variant max
 
 # ZCode: no stdin mode — substitute the file into the arg (a quoted "$()" passes the
 # bytes verbatim; the file's backticks/$ are NOT re-interpreted by the shell)
@@ -971,7 +983,7 @@ kimi_relay_file "/tmp/handoff.md" "$KIMI_MODEL"
 grok_relay "$(cat /tmp/handoff.md)"
 
 # Antigravity: substitute the file into the arg (agy 1.3.x also reads stdin when -p is omitted)
-agy_answer 300 -p "$(cat /tmp/handoff.md)"
+agy_answer 300 -p "$(cat /tmp/handoff.md)" --model "Gemini 4 Hydrogen (High)"
 
 # Claude: command-substitute the file into the prompt arg
 claude_relay -p "$(cat /tmp/handoff.md)"
@@ -1024,7 +1036,7 @@ requested lanes:
 ```bash
 KIMI_MODEL="${HEADLESS_RELAY_KIMI_MODEL:-kimi-code/k3}"
 codex exec < /tmp/handoff.md > /tmp/ans-gpt.md 2>/dev/null &
-cat /tmp/handoff.md | opencode run -m "zai-coding-plan/glm-5.3" --variant max > /tmp/ans-glm.md 2>/dev/null &
+cat /tmp/handoff.md | opencode run -m "zai-coding-plan/glm-5.4" --variant max > /tmp/ans-glm.md 2>/dev/null &
 # Kimi: opt-in only, bounded file/deadline; preserve diagnostics and exact status.
 kimi_relay_file "/tmp/handoff.md" "$KIMI_MODEL" > /tmp/ans-kimi.md 2>/tmp/ans-kimi.err &
 kimi_pid=$!
@@ -1035,7 +1047,7 @@ printf '%s\n' "$kimi_status" > /tmp/ans-kimi.status
 wait
 # Gemini runs SEQUENTIALLY, AFTER the burst — agy 1.1.0 wedges inside a 3+ CLI burst (see below):
 # agy 1.3.x exits 0 with EMPTY output when it denied a tool, so an empty answer is a failure (3):
-if agy_run 300 -p "$(cat /tmp/handoff.md)" --model "Gemini 3.8 Flash (High)" --settings "$AGY_RO" > /tmp/ans-gemini.md 2>/tmp/ans-gemini.err; then gemini_status=0; else gemini_status=$?; fi
+if agy_run 300 -p "$(cat /tmp/handoff.md)" --model "Gemini 4 Hydrogen (High)" --settings "$AGY_RO" > /tmp/ans-gemini.md 2>/tmp/ans-gemini.err; then gemini_status=0; else gemini_status=$?; fi
 if [ "$gemini_status" -eq 0 ] && [ ! -s /tmp/ans-gemini.md ]; then gemini_status=3; fi
 printf '%s\n' "$gemini_status" > /tmp/ans-gemini.status
 ```
@@ -1081,7 +1093,7 @@ aggregate index was built once, after every lane had finished, not per item.
 
 ```bash
 # runner.sh — sketch of that 2026-11-01 agy-only batch. Not a shipped helper, not a guarantee.
-# Define agy_run once first. bash: $BASHPID is this lane ($$ is the parent). No other model CLI.
+# Define agy_run and AGY_RO once first. bash: $BASHPID is this lane ($$ is the parent). No other model CLI.
 # 4 to 6 lanes were the observed range; one video per call; agy_run 900; one retry.
 # Detach so the batch outlives the calling agent's turn:
 #   setsid nohup bash runner.sh &
@@ -1102,7 +1114,7 @@ claim() { # $1 = NN. 0 = this lane owns it. mkdir is the atomic claim.
 }
 run_one() { # $1 = items/NN, $2 = NN. Publish out/NN.md only after a non-empty answer.
   try() {
-    text=$(agy_run 900 -p "$(cat prompt.md)" --model gemini-4-argon-high --add-dir "$1" --settings "$AGY_RO" </dev/null) || return $?
+    text=$(agy_run 900 -p "$(cat prompt.md)" --model gemini-4-hydrogen-high --add-dir "$1" --settings "$AGY_RO" </dev/null) || return $?
     [ -n "$text" ] || return 3   # empty answer: existing agy 1.3.x failure
     printf '%s\n' "$text"
   }
@@ -1127,8 +1139,10 @@ wait
 for f in out/*.md; do [ -f "$f" ] && printf '%s\n' "$f" >> index.txt; done
 ```
 
-The model id has to be one this account's `agy models` lists. `gemini-4-argon-high` is what
-that run used. An empty answer is still a failure: agy 1.3.x exits 0 with no text when it
+The model id has to be one this account's `agy models` lists. That run used `gemini-4-argon-high`;
+Argon leaves Antigravity on 2026-11-30 (see the Gemini notes in references/cli-reference.md), so
+the sketch now names `gemini-4-hydrogen-high`, which watched a test clip correctly on 2026-11-25.
+The 65-clip batch observation has not been repeated on Hydrogen. An empty answer is still a failure: agy 1.3.x exits 0 with no text when it
 denies a tool, which is why the sketch treats empty output as exit 3 (the same rule as
 `agy_answer`). A failed attempt does not leave `out/NN.md`, so the next launch can claim it.
 
@@ -1290,7 +1304,8 @@ perl -e 'alarm shift; exec @ARGV' 480 \
 # Gemini (agy 1.3.x): the 1.1.0 generate_image prompt now ends empty (print mode denies the shell
 # call the model makes instead). Run agy_image SOLO (the agy parallel-burst hang applies to media
 # too). The Google-account login covers it: no API key, no OpenRouter. Verified 2026-10-14 on
-# agy 1.3.4 (details in references/cli-reference.md).
+# agy 1.3.4 with 3.8 Flash; re-run 2026-11-25 on agy 1.5.17 with Gemini 4 Hydrogen (High), now the
+# model below (details in references/cli-reference.md).
 # agy 1.3.x: images come from the built-in image-generator subagent and land in agy's own
 # conversation folder; copy one out only if the reported path, symlinks resolved, is inside THIS run's folder,
 # and never over an existing file (exit 4 if the name is taken)
@@ -1304,7 +1319,7 @@ agy_image() (   # usage: agy_image "description" OUTPUT-DIR   (exit 3 = no image
   # a write probe first, so an unwritable OUTPUT-DIR fails before any generation
   probe=$(mktemp "$2/.agyimg.XXXXXX") && rm -f "$probe" || { echo "agy_image: cannot write to $2" >&2; exit 2; }
   out=$(cd "$W" && agy_run 600 -p "Use your image-generator subagent now to generate $1. Do not call MCP or memory tools, and do not run shell commands. When done, print exactly: SAVED: <absolute path>." \
-    --model "Gemini 3.8 Flash (High)" --output-format json </dev/null)
+    --model "Gemini 4 Hydrogen (High)" --output-format json </dev/null)
   rc=$?; [ "$rc" -eq 0 ] || exit "$rc"
   cid=$(printf '%s' "$out" | jq -r '.conversation_id // empty')
   src=$(printf '%s' "$out" | jq -r '.response // empty' | sed -n 's/^SAVED: //p' | tail -n 1)
@@ -1393,12 +1408,14 @@ Per-target support (detail in [references/cli-reference.md](references/cli-refer
 ### Scenario I — watch a video (video understanding)
 
 Asking a model to *watch* a local clip (describe it, transcribe it, pick a usable window, flag
-brand risks) is not the same as generating one. Live-tested 2026-10-09:
+brand risks) is not the same as generating one. Live-tested 2026-10-09; rows that name a later date
+were re-tested then:
 
 | Target | Can it watch a local clip headlessly? |
 |--------|---------------------------------------|
-| Gemini (agy, `"Gemini 3.8 Flash (High)"`) | **YES** — ~1 frame/s plus an automatic speech transcript (no raw audio). The lane to use for talks, interviews, jokes, quotes |
-| Gemini (agy, `"Gemini 4 Argon (High)"`, Google AI Ultra / eligible Enterprise only) | **YES** — one 20 s test (2026-10-14, agy 1.3.4, the `watch_clip` flow with the model swapped): speech came back split by sentence, with start and end times within about 0.6 s of word-level STT cue times (3.8 Flash returned one block in that run but split by sentence in two later runs, so this is not a clear difference). It also listed five booth names that the frames at that timestamp do not show, so check on-screen text and names against the frames |
+| Gemini (agy, `"Gemini 4 Hydrogen (High)"`) | **YES** — the default video lane since 2026-11-25. On a 4 s test clip (agy 1.5.17, the `watch_clip` flow) it read the on-screen text and returned the speech split by sentence with times, in 21 s. `"Gemini 4 Neon (High)"` gave the same answer in 34 s and `"Gemini 4 Carbon (High)"` in 216 s. The lane to use for talks, interviews, jokes, quotes |
+| Gemini (agy, `"Gemini 3.8 Flash (High)"`) | **YES, until 2026-11-30** — ~1 frame/s plus an automatic speech transcript (no raw audio); the default video lane until 2026-11-25 and still correct on that test (51 s). It leaves Antigravity on 2026-11-30, so do not pin it |
+| Gemini (agy, `"Gemini 4 Argon (High)"`, Google AI Ultra / eligible Enterprise only; leaves Antigravity on 2026-11-30) | **YES** — one 20 s test (2026-10-14, agy 1.3.4, the `watch_clip` flow with the model swapped): speech came back split by sentence, with start and end times within about 0.6 s of word-level STT cue times (3.8 Flash returned one block in that run but split by sentence in two later runs, so this is not a clear difference). It also listed five booth names that the frames at that timestamp do not show, so check on-screen text and names against the frames |
 | GLM-5.3-Flash | **Frames only, no speech**, and only through the Coding Plan API's `video_url` part. `opencode` lists the model as video-capable but its provider rejects video (and `run` exits 0 with empty output); `zcode --attach` forwards an empty placeholder |
 | Grok 4.7 | **NO** — `read_file` skips video as binary and the headless CLI forwards only image blocks |
 | GPT (Codex), Claude | Not tested |
@@ -1413,7 +1430,7 @@ watch_clip() (   # subshell: its own EXIT trap, so each clip's workspace is remo
   P=$(cat "$2") || exit 1   # read the prompt before cd; keep it out of the workspace
   # agy can hang: agy_run (define it once, above) stops it after 300 s with exit 124
   # AGY_RO keeps it answer-only; on agy 1.5.13 `--mode plan` ended this prompt empty
-  out=$(cd "$W" && agy_run 300 -p "$P" --model "Gemini 3.8 Flash (High)" --add-dir "$W" --sandbox --settings "$AGY_RO" </dev/null)
+  out=$(cd "$W" && agy_run 300 -p "$P" --model "Gemini 4 Hydrogen (High)" --add-dir "$W" --sandbox --settings "$AGY_RO" </dev/null)
   rc=$?; [ "$rc" -eq 0 ] || exit "$rc"
   # agy 1.3.4 exits 0 with EMPTY output when it auto-denied a tool ("jetski: no output produced")
   [ -n "$out" ] || { echo "watch_clip: empty answer; agy probably denied a tool" >&2; exit 3; }

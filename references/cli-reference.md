@@ -148,7 +148,7 @@ or stdin pipe both work.
 
 | Flag | Meaning |
 |------|---------|
-| `-m, --model <provider/model>` | e.g. `zai-coding-plan/glm-5.3`. |
+| `-m, --model <provider/model>` | e.g. `zai-coding-plan/glm-5.4`. |
 | `--variant <name>` | Provider reasoning effort: `minimal`, `high`, `max`. Z.ai recommends `max` for coding. |
 | `--format <default\|json>` | `json` emits raw JSON events. |
 | `-c, --continue` | Continue the last session. |
@@ -159,17 +159,24 @@ or stdin pipe both work.
 | `--thinking` | Show thinking blocks. |
 | `--dangerously-skip-permissions` | Auto-approve permissions not explicitly denied. |
 
-Model id note: in OpenCode use the bare `zai-coding-plan/glm-5.3`. The `[1m]` suffix is the
+Model id note: in OpenCode use the bare `zai-coding-plan/glm-5.4`. The `[1m]` suffix is the
 Anthropic-endpoint convention used by other tools and does not apply here; review-sized prompts
 sit under the default context anyway.
 
-GLM-5.3 (launched 2026-08-14; same 743B base as 5.2, gains from scaled post-training) is live
-on the Coding Plan — `zai-coding-plan/glm-5.3` smoke-verified via `opencode run` the same day.
-Heads-up for API users: the new endpoint no longer allows disabling thinking (efforts are
-low/high/max only) — a breaking change for apps that ran with thinking off. As of 2026-11-20
-GLM-5.3 is still Z.ai's newest flagship (no GLM-5.4/6 id is served), and the Coding Plan
-overview says requests for `glm-5.2` / `glm-5.1` are routed to GLM-5.3 and `glm-4.7` to
-GLM-5.3-Flash, so an old pin no longer selects the old model.
+GLM-5.4 (launched 2026-11-23) is Z.ai's current flagship and the default GLM pin. Z.ai's model
+page (docs.z.ai/guides/llm/glm-5.4) describes it as its first Loop Transformer (28 layers of the
+GLM-5 base run twice, about 750B parameters), with text, image, video and file input, a 1M-token
+context and up to 128K output tokens. It is available to every GLM Coding Plan user; the plain
+Model API follows after Z.ai's safety review, so treat it as Coding-Plan-only for now. Z.ai says
+it can get caught in very long "marathon thinking" loops, so give GLM-5.4 calls a generous
+deadline. Verified 2026-11-25 on OpenCode 1.19.5: `opencode models zai-coding-plan` lists
+`glm-5.4` next to `glm-5.3`, `glm-5.3-flash`, `glm-5.3-highspeed`, `glm-5.1` and `glm-5`, and
+`echo … | opencode run -m zai-coding-plan/glm-5.4 --variant max` answered in about 10 s.
+
+GLM-5.3 (launched 2026-08-14; same 743B base as 5.2) is the previous flagship. Heads-up for API
+users: since 5.3 the endpoint no longer allows disabling thinking (efforts are low/high/max
+only). The Coding Plan overview says requests for `glm-5.2` / `glm-5.1` are routed to GLM-5.3 and
+`glm-4.7` to GLM-5.3-Flash, so an old pin no longer selects the old model.
 
 Do not use `-f`/`--file` for prompt attachment in scripts. Pipe on stdin instead. Source-checked
 on 1.18.35 (`packages/opencode/src/cli/cmd/run.ts`): without `--attach`, `run -f` labels every file
@@ -374,6 +381,12 @@ exec node "$SHIM/zcode.cjs" "$@"
 Verified 2026-10-09: with the shim, `zcode --prompt "…" --mode plan --json` answers on
 `zai/glm-5.3` (the model reports itself as GLM-5.3). The CLI also reads `ZCODE_MODEL` for a
 one-off model override and `ZCODE_DATA_BASE_DIR` for an alternate config root.
+
+GLM-5.4 does not reach the ZCode lane yet on CLI 0.16.9 (app 3.14.5). Tested 2026-11-25: with
+`ZCODE_MODEL=zai/glm-5.4`, and again with `glm-5.4` added to the config's `models` map and set as
+`model.main`, the CLI log still resolved `zai-api/GLM-5.3` at startup and reported a 200K
+context window. ZCode's own changelog says newer app releases ship GLM-5.4 pre-configured, so
+update the app before pinning 5.4 here; until then use OpenCode for GLM-5.4.
 
 Do NOT `npm install zcode` or `zcode-cli` — unrelated 0.0.1 third-party stubs (supply-chain
 risk).
@@ -847,6 +860,29 @@ The answer-only examples in SKILL.md pass `AGY_RO` (`agy_answer` adds it and ref
 own `--settings`). `agy_image` runs in its own temp folder without it, because its image-generator
 subagent writes the image.
 
+**agy 1.5.16+: global skills and the model menu (re-checked 2026-11-25 on agy 1.5.17, macOS).**
+
+- 1.5.16 added discovery of user-global skills in `~/.agents/skills`, next to `~/.gemini/skills`.
+  A print-mode run from an empty temp workspace listed skills from both folders, also with
+  `--disable-slash-commands`, which only stops slash-command and skill expansion in the prompt.
+  The changelog documents no setting that turns discovery off, and with a temporary `HOME` the
+  CLI lost its sign-in (`agy models` printed nothing). Skill names and descriptions are part of
+  every Gemini relay call's context.
+- `AGY_RO` still holds on 1.5.17: asked to create a file, append to one and `touch` a file outside
+  the workspace, the run changed nothing and explained the denials.
+- `agy models` on this account listed Gemini 4 Neon (low/medium/high/xhigh), Carbon
+  (low/medium/high), Argon (low/medium/high), Hydrogen (low/medium/high/xhigh), the Orchestrator
+  rows and Gemini 3.8 Flash. Google's blog announced Gemini 4 Neon on 2026-11-18 (also in the
+  Gemini API at $3 / $15 per million input / output tokens, 1M context). 9to5Google reported on
+  2026-11-23 that Carbon now reaches paid AI Pro in Antigravity, that Hydrogen will reach all
+  users, and that Gemini 4 Argon and Gemini 3.8 Flash leave Antigravity on 2026-11-30; the
+  Antigravity changelog read the same day did not state that date, so re-check the menu after
+  the 30th.
+- Text and video probes on 2026-11-25 (the `watch_clip` flow, a 4 s clip with on-screen text and
+  two spoken sentences): Hydrogen (High) 21 s, Neon (High) 34 s, 3.8 Flash (High) 51 s, Carbon
+  (High) 216 s; all four read the text and the speech correctly. The skill's default Gemini lane
+  is now `"Gemini 4 Hydrogen (High)"`.
+
 The standalone Gemini CLI (`gemini`, `google-gemini/gemini-cli`) is still released, but it is not
 a drop-in lane for personal Google accounts. Its source (0.62.0, `code_assist/setup.ts`) puts a
 Google login without `GOOGLE_CLOUD_PROJECT` on the free "Gemini Code Assist for individuals" tier,
@@ -870,8 +906,8 @@ instead, so the Google sign-in went through before the tier check failed.
 | `--json-schema <schema\|file>` | Enforce structured output (for `stream-json`, only on the final result). |
 | `--input-format stream-json` | One NDJSON message per stdin line, one turn each; requires `--output-format stream-json`. |
 | `--print-timeout <dur>` | Print-mode wait cap. Default `0s` on 1.3.4 (wait until the turn completes; it was `5m0s` on 1.1.x), so always bound the call yourself. When it fires, agy prints `print timeout after … returning partial output` on stderr and still exits 0 (an empty `response` in JSON), so it is not a failure signal; bound the run with `agy_run` instead. |
-| `--model <name>` | A model id or display string from `agy models`, e.g. `gemini-3.8-flash-high` or `"Gemini 3.8 Flash (High)"`. Omit to use the user's configured default. |
-| `--effort <level>` | `low\|medium\|high\|xhigh\|max`. Works only with a base model id: `--model gemini-3.8-flash --effort high`. With a display string such as `"Gemini 3.8 Flash (High)"` it fails with `--effort is not supported for model`, and `"Gemini 3.8 Flash"` without a tier suffix is not a valid model. The levels depend on the model: Gemini 4 Argon takes only `low`, `medium` and `high`. |
+| `--model <name>` | A model id or display string from `agy models`, e.g. `gemini-4-hydrogen-high` or `"Gemini 4 Hydrogen (High)"`. Omit to use the user's configured default. |
+| `--effort <level>` | `low\|medium\|high\|xhigh\|max`. Works only with a base model id: `--model gemini-4-hydrogen --effort high`. With a display string such as `"Gemini 4 Hydrogen (High)"` it fails with `--effort is not supported for model`, and `"Gemini 4 Hydrogen"` without a tier suffix is not a valid model. The levels depend on the model: Neon and Hydrogen take `low` to `xhigh`, Carbon takes only `low`, `medium` and `high`. |
 | `--add-dir <path>` | Add a directory to the workspace (repeatable) — it also BECOMES the working directory. Without it agy works in its own scratch dir, `~/.gemini/antigravity-cli/scratch`. |
 | `--mode <mode>` | `accept-edits`, `auto`, `plan` (1.5.13). Headless runs default to `auto` since 1.5.7. An unknown value only warns and runs in Auto. `plan` is not an answer-only mode on 1.5.13; use `--settings "$AGY_RO"`. |
 | `--settings <json\|file>` | Settings for this run only, never saved: settings.json keys, inline or as a file. Unknown keys and values fail before the run. A second `--settings` replaces the first. |
@@ -900,8 +936,8 @@ November 2026 brought three more Gemini 4 models to Antigravity:
 
 | Model | Released | Antigravity plans | Thinking levels | Role |
 |-------|----------|-------------------|-----------------|------|
-| Gemini 4 Carbon (`gemini-4-carbon`) | 2026-11-10 | Google AI Ultra, Enterprise | low, medium, high | Strongest model, long-horizon work |
-| Gemini 4 Hydrogen (`gemini-4-hydrogen`) | 2026-11-12 | paid Google AI Pro and Ultra | low, medium, high (default), xhigh | Fast everyday model, the Flash successor |
+| Gemini 4 Carbon (`gemini-4-carbon`) | 2026-11-10 | Google AI Ultra, Enterprise; paid AI Pro since 2026-11-23 (9to5Google) | low, medium, high | Strongest model, long-horizon work; slowest in the 2026-11-25 video probe |
+| Gemini 4 Hydrogen (`gemini-4-hydrogen`) | 2026-11-12 | paid Google AI Pro and Ultra; Google says all users later | low, medium, high (default), xhigh | Fast everyday model, the Flash successor; the skill's default Gemini lane since 2026-11-25 |
 | Gemini 4 Neon (`gemini-4-neon`) | 2026-11-18 | paid Google AI Pro and Ultra | low, medium, high (default), xhigh | Between Hydrogen and Carbon; replaces Argon in the Gemini app |
 
 On 2026-11-20 `agy models` on agy 1.5.13 (one account) listed `gemini-4-neon-low|medium|high|xhigh`,
@@ -921,9 +957,10 @@ Print probes on 1.5.13 that answered: `--model gemini-4-neon-high`, `--model "Ge
 (available: low, medium, high, xhigh)`), `--model gemini-4-argon --effort xhigh`, and a display
 string with `--effort` (`--effort is not supported for model "Gemini 4 Neon (High)"`). agy's JSON
 result has no served-model field (`usage` holds only token counts), so the requested id is all a
-run can report. The recipes below keep `"Gemini 3.8 Flash (High)"` because the image and
-video-watching checks were run on it (both re-run on 1.5.13); Hydrogen and Neon were not tested on
-those recipes.
+run can report. Since 2026-11-25 the recipes below use `"Gemini 4 Hydrogen (High)"`: on agy
+1.5.17 it passed both the image check (`agy_image` saved the requested image in 48 s) and the
+`watch_clip` check. Neon passed `watch_clip` but in one `agy_image` run returned no `SAVED:` path,
+so it is not the image default.
 
 Notes, all live-verified:
 - **Print mode auto-denies tools on 1.3.4** (on 1.5.13 only tools that still need a prompt, such
@@ -967,6 +1004,8 @@ Notes, all live-verified:
   The `agy_image` and `watch_clip` recipes below use it.
 
 ```bash
+# AGY_RO: answer-only deny rules (same value as SKILL.md); watch_clip below passes it to agy_run.
+AGY_RO='{"permissions":{"deny":["write_file(*)","command(*)","execute_url(*)","mcp(*)"]}}'
 # agy_run SECS AGY-ARGS...: run agy with a real deadline (exit 124 on timeout, 130 on INT/TERM/HUP).
 # agy is a Go binary and ignores SIGALRM, so `perl -e 'alarm …; exec agy …'` does not stop it, and
 # its --print-timeout exits 0 with partial output. agy runs in a process group led by a small keeper
@@ -1065,8 +1104,8 @@ finish(rc if rc >= 0 else 128 - rc)
 
 ## Media generation (image / video)
 
-A few targets can generate media, not just text. Only Grok does it headlessly today. All
-notes live-verified 2026-07-10.
+A few targets can generate media, not just text. Only Grok generates video headlessly today;
+images also come from Codex and Gemini. Notes live-verified 2026-07-10 unless dated otherwise.
 
 ### Grok — native media tools (headless, works)
 
@@ -1183,7 +1222,7 @@ agy_image() (   # usage: agy_image "description" OUTPUT-DIR   (exit 3 = no image
   # a write probe first, so an unwritable OUTPUT-DIR fails before any generation
   probe=$(mktemp "$2/.agyimg.XXXXXX") && rm -f "$probe" || { echo "agy_image: cannot write to $2" >&2; exit 2; }
   out=$(cd "$W" && agy_run 600 -p "Use your image-generator subagent now to generate $1. Do not call MCP or memory tools, and do not run shell commands. When done, print exactly: SAVED: <absolute path>." \
-    --model "Gemini 3.8 Flash (High)" --output-format json </dev/null)
+    --model "Gemini 4 Hydrogen (High)" --output-format json </dev/null)
   rc=$?; [ "$rc" -eq 0 ] || exit "$rc"
   cid=$(printf '%s' "$out" | jq -r '.conversation_id // empty')
   src=$(printf '%s' "$out" | jq -r '.response // empty' | sed -n 's/^SAVED: //p' | tail -n 1)
@@ -1258,7 +1297,7 @@ fallback, not a requirement.
 **agy 1.1.0 (historical, verified 2026-07-10).** agy then had a `generate_image` tool that the
 root agent called directly. Like Grok's and Codex's media tools, it was not a CLI flag, so it
 never showed in `agy models` or `agy --help`. A solo run of
-`agy -p "Call your generate_image tool immediately — do not research, spawn subagents, or use a skill. Generate a <description>. Save it to the current directory. Print exactly: SAVED: <absolute path>." --model "Gemini 3.8 Flash (High)" --add-dir "$PWD" </dev/null`
+`agy -p "Call your generate_image tool immediately — do not research, spawn subagents, or use a skill. Generate a <description>. Save it to the current directory. Print exactly: SAVED: <absolute path>." --model "Gemini 3.1 Pro (High)" --add-dir "$PWD" </dev/null`
 wrote an orange-triangle JPG into the target dir in ~34 s; `--add-dir "$PWD"` made agy write
 there. An even earlier "agy has no image tool" reading was wrong. It came from checking
 `agy models`/`--help`, which never list runtime tools, and from an attempt that hung in a
@@ -1279,7 +1318,7 @@ crowd laughter):
 
 | Lane | Watches a local clip headlessly? | What it actually receives |
 |------|----------------------------------|---------------------------|
-| Gemini via `agy` (`"Gemini 3.8 Flash (High)"`) | **YES** | About 1 frame per second **plus an automatic speech transcript**; not raw audio (music, applause and crowd noise are inferred, not heard). Timelines matched hand-checked frames within ~1 s (2026-10-05 test); transcripts are detailed enough to find candidate quotes, but re-check a quote before captioning it |
+| Gemini via `agy` (`"Gemini 4 Hydrogen (High)"`; 3.8 Flash until it leaves on 2026-11-30) | **YES** | About 1 frame per second **plus an automatic speech transcript**; not raw audio (music, applause and crowd noise are inferred, not heard). Timelines matched hand-checked frames within ~1 s (2026-10-05 test, on 3.8 Flash; Hydrogen read the text and both sentences correctly on the 2026-11-25 probe); transcripts are detailed enough to find candidate quotes, but re-check a quote before captioning it |
 | GLM-5.3-Flash (Z.ai Coding Plan) | **Frames only, and only via the API** | No speech at all: it says so honestly and cannot transcribe. Misread on-screen text once. Neither GLM CLI can pass the video (below) |
 | Grok 4.7 (`grok` 1.0.50) | **NO** | Nothing usable (below) |
 | GPT (Codex), Claude | Not tested in this pass | — |
@@ -1298,7 +1337,7 @@ watch_clip() (   # subshell: its own EXIT trap, so each clip's workspace is remo
   P=$(cat "$2") || exit 1   # read the prompt before cd; keep it out of the workspace
   # agy can hang: agy_run (define it once, above) stops it after 300 s with exit 124
   # AGY_RO keeps it answer-only; on agy 1.5.13 `--mode plan` ended this prompt empty
-  out=$(cd "$W" && agy_run 300 -p "$P" --model "Gemini 3.8 Flash (High)" --add-dir "$W" --sandbox --settings "$AGY_RO" </dev/null)
+  out=$(cd "$W" && agy_run 300 -p "$P" --model "Gemini 4 Hydrogen (High)" --add-dir "$W" --sandbox --settings "$AGY_RO" </dev/null)
   rc=$?; [ "$rc" -eq 0 ] || exit "$rc"
   # agy 1.3.4 exits 0 with EMPTY output when it auto-denied a tool ("jetski: no output produced")
   [ -n "$out" ] || { echo "watch_clip: empty answer; agy probably denied a tool" >&2; exit 3; }
@@ -1577,7 +1616,7 @@ structured output for the precise reason. When capturing a piped tool's exit thr
 | agy file operations land in `~/.gemini/antigravity-cli/scratch` | Antigravity's default working dir is its own scratch workspace, not your cwd | Pass `--add-dir /path/to/repo` (it becomes the working directory); use absolute paths in prompts |
 | agy: `flag needs an argument: -print` | `-p` was given no value | Use `agy_answer 300 -p "$(cat file)"` (quoted command substitution passes the bytes verbatim; bare `agy -p` on 1.5.x can edit files), or on agy 1.3.x+ omit `-p` and pipe the file on stdin with `--settings "$AGY_RO"` |
 | agy exits 0 with empty output; stderr `jetski: no output produced — a tool required the "…" permission` | agy 1.3.x print mode auto-denies tools; JSON output lists `denied_actions` | Tell the model to answer in text without tools, or add a `permissions.allow` rule; treat empty output as a failed relay |
-| agy: `--effort is not supported for model "Gemini 3.8 Flash (High)"` | `--effort` only works with a base model id | Use `--model gemini-3.8-flash --effort high`, or keep the display string without `--effort` |
+| agy: `--effort is not supported for model "Gemini 4 Hydrogen (High)"` | `--effort` only works with a base model id | Use `--model gemini-4-hydrogen --effort high`, or keep the display string without `--effort` |
 | agy modifies files you only wanted reviewed | agy 1.5.7+ starts headless runs in Auto mode, which edits workspace files without asking (1.1.x also ran tools unprompted; 1.3.x auto-denied them) | Pass `--settings "$AGY_RO"` (or use `agy_answer`, which adds it), and do not pass `--dangerously-skip-permissions` for reviews. `--mode plan` is not a substitute on 1.5.13 |
 | agy: `jetski: no output produced — a tool required the "mcp" permission …` | The prompt made agy reach for a tool that headless mode auto-denies (e.g. listing a directory), or a global rule in `~/.gemini/GEMINI.md` told the model to call an MCP tool first (seen 2026-10-14 with a memory server) | Keep the prompt to the task (e.g. watch only `clip.mp4`), add "do not call MCP or memory tools", and rerun; do not reach for `--dangerously-skip-permissions` |
 | agy image prompt ("call your generate_image tool") exits 0 with no image | agy 1.3.x: the root agent called no `generate_image` tool, made a shell call instead, and print mode denied it | Use `agy_image` (built-in image-generator subagent; the file is copied out of `~/.gemini/antigravity-cli/brain/<conversation_id>/` after a path check) |

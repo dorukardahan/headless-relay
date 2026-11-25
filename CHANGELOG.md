@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 
+## [3.4.0] - 2026-11-25
+
+Model refresh for GLM-5.4 and the Gemini 4 line, ahead of Gemini 4 Argon and Gemini 3.8 Flash leaving Antigravity.
+
+### Changed
+
+- GLM lane: every OpenCode example now pins `zai-coding-plan/glm-5.4`. GLM-5.4 (2026-11-23) is Z.ai's first Loop Transformer, Coding-Plan-only for now (the Model API follows after Z.ai's safety review), with text, image, video and file input, 1M context and up to 128K output. Z.ai warns it can run very long thinking loops, so give it a generous deadline. Live-verified 2026-11-25 on OpenCode 1.19.5: `opencode models zai-coding-plan` lists `glm-5.4` and `opencode run -m zai-coding-plan/glm-5.4 --variant max` answered.
+- Gemini lane: the answer, Party Mode, batch, `watch_clip` and `agy_image` recipes move from `Gemini 3.8 Flash (High)` / `gemini-4-argon-high` to `Gemini 4 Hydrogen (High)` / `gemini-4-hydrogen-high`. Per 9to5Google (2026-11-23), Argon and 3.8 Flash leave Antigravity on 2026-11-30. Live-verified 2026-11-25 on agy 1.5.17: on a 4 s test clip Hydrogen read the on-screen text and the speech correctly in 21 s (Neon 34 s, 3.8 Flash 51 s, Carbon 216 s, all correct), and `agy_image` saved the requested image with Hydrogen in 48 s; Neon returned no `SAVED:` path in one image run.
+- `scripts/regression-agy-readonly.sh` checks the consensus and batch examples for the Hydrogen pins.
+
+### Documentation and safety
+
+- agy 1.5.16+ loads user-global skills from `~/.agents/skills` (often the Codex skill home) as well as `~/.gemini/skills` in every run, headless included. Verified on 1.5.17 from an empty workspace, also with `--disable-slash-commands`; there is no documented switch to turn it off and a temporary `HOME` loses the sign-in. SKILL.md and the CLI reference now say that skill names and descriptions are sent with every Gemini relay call.
+- `AGY_RO` re-checked on agy 1.5.17: a request to create a file, append to one and run `touch` changed nothing.
+- ZCode lane: CLI 0.16.9 (app 3.14.5) still answers on GLM-5.3 even with `ZCODE_MODEL=zai/glm-5.4` and a `glm-5.4` config entry, so the ZCode recipes keep `zai/glm-5.3` until the app is updated; use OpenCode for GLM-5.4.
+- Gemini model table: Carbon reached paid AI Pro on 2026-11-23 (per 9to5Google), Hydrogen is the default lane, and the `--model` / `--effort` examples use Hydrogen ids.
+
 ## [3.3.0] - 2026-11-20
 
 This minor release includes the accumulated changes since v3.2.0.
