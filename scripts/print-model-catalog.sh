@@ -253,13 +253,13 @@ echo
 echo "## GLM"
 if have opencode; then
   echo "OpenCode binary: $(command -v opencode)"
-  echo "OpenCode has no safe catalog subcommand in this skill's contract. Current Coding Plan flagship pin is \`zai-coding-plan/glm-5.3\` (see SKILL.md). Confirm with the user's OpenCode auth, not a guessed id."
+  echo "This script does not call OpenCode's catalog; run \`opencode models zai-coding-plan\` yourself to list it. Current Coding Plan flagship pin is \`zai-coding-plan/glm-5.4\` (see SKILL.md). Confirm with the user's OpenCode auth, not a guessed id."
 else
   echo "OpenCode: skip (\`opencode\` not on PATH)"
 fi
 if have zcode; then
   echo "ZCode binary: $(command -v zcode)"
-  echo "ZCode recipes pin \`zai/glm-5.3\`. GLM-5.2 is previous generation."
+  echo "ZCode recipes pin \`zai/glm-5.3\`: ZCode CLI 0.16.9 (app 3.14.5) still answers on GLM-5.3 even with ZCODE_MODEL=zai/glm-5.4. Use OpenCode for GLM-5.4."
 else
   echo "ZCode: skip (\`zcode\` not on PATH)"
 fi

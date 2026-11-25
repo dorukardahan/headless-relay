@@ -58,9 +58,9 @@ for f in "$SKILL" "$ROOT/references/cli-reference.md"; do
   grep -q -- '--settings "\$AGY_RO"' "$T/watch" || fail "watch_clip lacks AGY_RO in ${f#"$ROOT"/}"
   ! grep -v '^[[:space:]]*#' "$T/watch" | grep -q -- '--mode plan' || fail "watch_clip still uses --mode plan in ${f#"$ROOT"/}"
 done
-grep -q 'agy_run 300 -p "$(cat /tmp/handoff.md)" --model "Gemini 3.8 Flash (High)" --settings "$AGY_RO"' "$SKILL" \
-  || fail "Party Mode Gemini lane lacks AGY_RO"
-grep -q 'agy_run 900 -p "$(cat prompt.md)" --model gemini-4-argon-high --add-dir "$1" --settings "$AGY_RO"' "$SKILL" \
+grep -q 'agy_run 300 -p "$(cat /tmp/handoff.md)" --model "Gemini 4 Hydrogen (High)" --settings "$AGY_RO"' "$SKILL" \
+  || fail "consensus Gemini example lacks AGY_RO or the Hydrogen pin"
+grep -q 'agy_run 900 -p "$(cat prompt.md)" --model gemini-4-hydrogen-high --add-dir "$1" --settings "$AGY_RO"' "$SKILL" \
   || fail "parallel agy batch lacks AGY_RO"
 
 printf 'agy read-only regression: PASS\n'

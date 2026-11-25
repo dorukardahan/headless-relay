@@ -43,8 +43,9 @@ that current Grok versions automatically upload your entire repository.
   `env -i` + empty HOME + clean temp GROK_HOME, only the four media tools allowed, media published
   atomically); Grok is
   the only lane that also does video. The skill documents each CLI's quirks
-- **Video understanding**: which lane can actually *watch* a local clip (Gemini via agy: frames plus
-  a speech transcript; GLM-5.3-Flash: frames only, via the Coding Plan API; Grok: no), with recipes
+- **Video understanding**: which lane can actually *watch* a local clip (Gemini 4 Hydrogen via agy:
+  frames plus a speech transcript; GLM-5.3-Flash: frames only, via the Coding Plan API; Grok: no),
+  with recipes
 - **Scripting**: JSON output parsing and session resume for multi-turn work
 - **Safety rails**: a preflight gate (installed + logged in?), a provider-terms compliance gate
   for non-native harnesses, and a **hardened, tool-restricted helper for Grok (hermetic `env -i` + empty
@@ -104,16 +105,16 @@ agent's skills directory:
 | Nous Research Hermes | `~/.hermes/skills/headless-relay/` (also scans `~/.agents/skills/`) |
 | Cursor, ZCode, and other agentskills.io-compatible runtimes | check your agent's skills directory convention; the skill has no platform-specific syntax |
 
-Stable release: [v3.3.0](https://github.com/dorukardahan/headless-relay/releases/tag/v3.3.0).
+Stable release: [v3.4.0](https://github.com/dorukardahan/headless-relay/releases/tag/v3.4.0).
 See [CHANGELOG.md](CHANGELOG.md) for changes, verification and limitations.
 
 Example (pinned release, including all helper scripts):
 
 ```bash
-git clone --branch v3.3.0 --depth 1 https://github.com/dorukardahan/headless-relay.git ~/.claude/skills/headless-relay
+git clone --branch v3.4.0 --depth 1 https://github.com/dorukardahan/headless-relay.git ~/.claude/skills/headless-relay
 ```
 
-To track unreleased development instead, omit `--branch v3.3.0 --depth 1`.
+To track unreleased development instead, omit `--branch v3.4.0 --depth 1`.
 
 ## Requirements
 
@@ -202,6 +203,13 @@ documented too. Antigravity adds Gemini 4 Hydrogen and Neon (paid Pro/Ultra, `xh
 Carbon (Ultra/Enterprise). The Claude lane notes the Sonnet 5.5, Haiku 5.5 and Fable 5.2 version
 gates and the safety-classifier fallback that can swap the served model. Kimi K3.1 Pro is
 documented, but the relay default stays `kimi-code/k3` until a K3.1 CLI alias is verified.
+
+2026-11-25 model refresh (v3.4.0): the GLM lane pins `zai-coding-plan/glm-5.4` (Z.ai's first
+Loop Transformer, launched 2026-11-23, Coding Plan only for now), and the Gemini lane moves to
+`Gemini 4 Hydrogen (High)` because Gemini 4 Argon and Gemini 3.8 Flash leave Antigravity on
+2026-11-30. Hydrogen passed the video and image checks on agy 1.5.17. Since agy 1.5.16, every
+Gemini run also loads the skills in `~/.agents/skills`, so their names and descriptions travel
+with the prompt.
 
 v3.3.0 also re-verifies the Gemini lane on agy 1.5.13. Since agy 1.5.7 a headless `agy -p` run
 starts in Auto mode and edits workspace files without asking, so every answer-only Gemini example
